@@ -37,7 +37,7 @@ with terminal condition $V_T(s) = 0$ for all $s$.
 
 The battery's state of charge evolves differently for charging and discharging due to conversion losses:
 
-$$s' = \begin{cases} s + \eta_c \cdot a \cdot \Delta t & \text{if } a \geq 0 \text{ (charging)} \\[4pt] s + \dfrac{a}{\eta_d} \cdot \Delta t & \text{if } a < 0 \text{ (discharging)} \end{cases}$$
+$$s' = \begin{cases} s + \eta_c \cdot a \cdot \Delta t & \text{if } a \geq 0 \text{ (charging)} \\\\ s + \dfrac{a}{\eta_d} \cdot \Delta t & \text{if } a < 0 \text{ (discharging)} \end{cases}$$
 
 When charging, the grid delivers $a \cdot \Delta t$ kWh but only $\eta_c \cdot a \cdot \Delta t$ reaches the battery (the rest is lost as heat). When discharging, the battery must release $|a| \cdot \Delta t / \eta_d$ kWh internally to deliver $|a| \cdot \Delta t$ to the grid. Parameters: $\eta_c = \eta_d = 0.95$, $\Delta t = 0.5$ h.
 
@@ -49,7 +49,7 @@ The first term is arbitrage revenue. When charging ($a > 0$), the battery buys e
 
 ### Feasible Action Set
 
-$$\mathcal{A}(s, t) = \left\{ a \in [-\bar{a},\, \bar{a}] \;\middle|\; s_{\min} \leq s' \leq s_{\max} \right\}$$
+$$\mathcal{A}(s, t) = \left\lbrace a \in [-\bar{a},\, \bar{a}] \;\mid\; s_{\min} \leq s' \leq s_{\max} \right\rbrace$$
 
 Actions are bounded by the dispatch limit $\bar{a}$ (kW) and by the requirement that the next SoC stays within the battery's operating range: $s_{\min} = 0.1 \times E_{\text{rated}}$ (reserve) to $s_{\max} = E_{\text{rated}}$ (full capacity).
 
@@ -176,7 +176,7 @@ return dispatch
 
 When constraints are active, the DP's feasible action set is restricted:
 
-$$\mathcal{A}_c(s, t) = \left\{ a \in \mathcal{A}(s,t) \;\middle|\; a \leq a_{\min}^{\text{dis}}(t),\; a \leq a_{\max}^{\text{chg}}(t),\; s' \geq s_{\min}^{\text{net}}(t{+}1) \right\}$$
+$$\mathcal{A}_c(s, t) = \left\lbrace a \in \mathcal{A}(s,t) \;\mid\; a \leq a_{\min}^{\text{dis}}(t),\; a \leq a_{\max}^{\text{chg}}(t),\; s' \geq s_{\min}^{\text{net}}(t{+}1) \right\rbrace$$
 
 | Constraint | Source | Purpose |
 |------------|--------|---------|
