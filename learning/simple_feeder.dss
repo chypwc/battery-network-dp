@@ -1,0 +1,17 @@
+! Simple feeder with one house
+! Frequency set to 50Hz (Australia)
+
+Clear
+New Circuit.SimpleFeeder basekv=0.23 pu=1.0 phases=1 frequency=50
+
+! Line from substation to house
+! Length=0.1km, R=0.5 ohm/km, X=0.3 ohm/km
+New Line.Line1 Bus1=sourcebus Bus2=housebus phases=1 length=0.1 R1=0.5 X1=0.3
+
+! House load: 2kW, power factor 0.95
+New Load.House1 Bus1=housebus phases=1 kV=0.23 kW=2.0 pf=0.95
+
+! Set voltage base and frequency
+Set Voltagebases=[0.23]
+CalcVoltageBases
+Set defaultbasefrequency=50

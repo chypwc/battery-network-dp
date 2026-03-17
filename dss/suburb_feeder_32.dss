@@ -1,0 +1,157 @@
+! ============================================================
+! ACT Suburban Feeder — Extended 32-House Model
+! ============================================================
+! Topology:
+!   11kV source → 200kVA transformer → LV bus (400V 3-phase)
+!   → Main trunk (150m) → Junction
+!     ├── Branch A (4 nodes at 50/100/150/200m, 16 houses, community battery at end)
+!     └── Branch B (4 nodes, identical, no battery — control group)
+!
+! Each node: 4 houses distributed across phases, some with 6.6 kW solar
+! Total: 32 houses, ~100 kW peak load, 66 kW solar capacity
+!
+! Cable: 95mm² Al underground, R≈0.32 Ω/km, X≈0.08 Ω/km (typical AS/NZS 3008)
+!
+! Australian standards: 230V phase-neutral, 50Hz
+! Voltage limits: AS 61000.3.100 → 230V +10%/-6% (216–253V)
+! ============================================================
+
+Clear
+
+! --- Source: 11kV medium voltage network (stiff grid) ---
+New Circuit.Suburb_32 basekv=11 pu=1.0 phases=3 frequency=50
+
+! --- Distribution transformer: 11kV/0.4kV, 200 kVA ---
+New Transformer.Tx1 phases=3 windings=2
+~ wdg=1 bus=sourcebus kV=11   kVA=200
+~ wdg=2 bus=lv_bus    kV=0.4  kVA=200
+~ %loadloss=1.5 %noloadloss=0.3 XHL=4.0
+
+! --- Main trunk cable: LV bus to junction (150m, 3-phase) ---
+New Line.Trunk Bus1=lv_bus Bus2=junction phases=3 length=0.15
+~ R1=0.32 X1=0.08 R0=0.52 X0=0.12
+
+
+! =============================================================
+! BRANCH A: 4 nodes, 16 houses, 10 with solar, community battery
+! =============================================================
+! Cable segments between nodes (each 50m)
+! Junction → A1 (50m) → A2 (100m) → A3 (150m) → A4 (200m from junction)
+
+New Line.BrA_seg1 Bus1=junction.1.2.3 Bus2=brA1.1.2.3 phases=3 length=0.05
+~ R1=0.32 X1=0.08 R0=0.52 X0=0.12
+
+New Line.BrA_seg2 Bus1=brA1.1.2.3 Bus2=brA2.1.2.3 phases=3 length=0.05
+~ R1=0.32 X1=0.08 R0=0.52 X0=0.12
+
+New Line.BrA_seg3 Bus1=brA2.1.2.3 Bus2=brA3.1.2.3 phases=3 length=0.05
+~ R1=0.32 X1=0.08 R0=0.52 X0=0.12
+
+New Line.BrA_seg4 Bus1=brA3.1.2.3 Bus2=brA4.1.2.3 phases=3 length=0.05
+~ R1=0.32 X1=0.08 R0=0.52 X0=0.12
+
+! --- Node A1 (50m from junction): 4 houses, 2 with 6.6kW solar ---
+New Load.House_A1a Bus1=brA1.1 phases=1 kV=0.23 kW=3.2 pf=0.97
+New Load.House_A1b Bus1=brA1.2 phases=1 kV=0.23 kW=2.8 pf=0.95
+New Load.House_A1c Bus1=brA1.3 phases=1 kV=0.23 kW=3.5 pf=0.96
+New Load.House_A1d Bus1=brA1.1 phases=1 kV=0.23 kW=2.5 pf=0.98
+
+New Generator.PV_A1a Bus1=brA1.1 phases=1 kV=0.23 kW=6.6 pf=1.0
+New Generator.PV_A1b Bus1=brA1.3 phases=1 kV=0.23 kW=6.6 pf=1.0
+
+! --- Node A2 (100m from junction): 4 houses, 3 with 6.6kW solar ---
+New Load.House_A2a Bus1=brA2.1 phases=1 kV=0.23 kW=3.0 pf=0.96
+New Load.House_A2b Bus1=brA2.2 phases=1 kV=0.23 kW=3.3 pf=0.97
+New Load.House_A2c Bus1=brA2.3 phases=1 kV=0.23 kW=2.6 pf=0.95
+New Load.House_A2d Bus1=brA2.2 phases=1 kV=0.23 kW=3.1 pf=0.96
+
+New Generator.PV_A2a Bus1=brA2.1 phases=1 kV=0.23 kW=6.6 pf=1.0
+New Generator.PV_A2b Bus1=brA2.2 phases=1 kV=0.23 kW=6.6 pf=1.0
+New Generator.PV_A2c Bus1=brA2.3 phases=1 kV=0.23 kW=6.6 pf=1.0
+
+! --- Node A3 (150m from junction): 4 houses, 2 with 6.6kW solar ---
+New Load.House_A3a Bus1=brA3.1 phases=1 kV=0.23 kW=2.7 pf=0.95
+New Load.House_A3b Bus1=brA3.2 phases=1 kV=0.23 kW=3.4 pf=0.97
+New Load.House_A3c Bus1=brA3.3 phases=1 kV=0.23 kW=3.0 pf=0.96
+New Load.House_A3d Bus1=brA3.1 phases=1 kV=0.23 kW=2.9 pf=0.98
+
+New Generator.PV_A3a Bus1=brA3.2 phases=1 kV=0.23 kW=6.6 pf=1.0
+New Generator.PV_A3b Bus1=brA3.3 phases=1 kV=0.23 kW=6.6 pf=1.0
+
+! --- Node A4 (200m from junction): 4 houses, 3 with 6.6kW solar + BATTERY ---
+New Load.House_A4a Bus1=brA4.1 phases=1 kV=0.23 kW=3.1 pf=0.96
+New Load.House_A4b Bus1=brA4.2 phases=1 kV=0.23 kW=2.9 pf=0.95
+New Load.House_A4c Bus1=brA4.3 phases=1 kV=0.23 kW=3.3 pf=0.97
+New Load.House_A4d Bus1=brA4.1 phases=1 kV=0.23 kW=2.7 pf=0.96
+
+New Generator.PV_A4a Bus1=brA4.1 phases=1 kV=0.23 kW=6.6 pf=1.0
+New Generator.PV_A4b Bus1=brA4.2 phases=1 kV=0.23 kW=6.6 pf=1.0
+New Generator.PV_A4c Bus1=brA4.3 phases=1 kV=0.23 kW=6.6 pf=1.0
+
+! Community battery at end of Branch A (worst voltage point)
+New Storage.CommunityBatt Bus1=brA4 phases=3 kV=0.4
+~ kWRated=100 kWhRated=200 kWhStored=100
+~ %EffCharge=95 %EffDischarge=95
+~ %reserve=10 %IdlingkW=0.5
+~ State=IDLING
+
+
+! =============================================================
+! BRANCH B: identical to Branch A, NO battery (control group)
+! =============================================================
+
+New Line.BrB_seg1 Bus1=junction.1.2.3 Bus2=brB1.1.2.3 phases=3 length=0.05
+~ R1=0.32 X1=0.08 R0=0.52 X0=0.12
+
+New Line.BrB_seg2 Bus1=brB1.1.2.3 Bus2=brB2.1.2.3 phases=3 length=0.05
+~ R1=0.32 X1=0.08 R0=0.52 X0=0.12
+
+New Line.BrB_seg3 Bus1=brB2.1.2.3 Bus2=brB3.1.2.3 phases=3 length=0.05
+~ R1=0.32 X1=0.08 R0=0.52 X0=0.12
+
+New Line.BrB_seg4 Bus1=brB3.1.2.3 Bus2=brB4.1.2.3 phases=3 length=0.05
+~ R1=0.32 X1=0.08 R0=0.52 X0=0.12
+
+! --- Node B1 (50m): 4 houses, 2 with solar ---
+New Load.House_B1a Bus1=brB1.1 phases=1 kV=0.23 kW=3.2 pf=0.97
+New Load.House_B1b Bus1=brB1.2 phases=1 kV=0.23 kW=2.8 pf=0.95
+New Load.House_B1c Bus1=brB1.3 phases=1 kV=0.23 kW=3.5 pf=0.96
+New Load.House_B1d Bus1=brB1.1 phases=1 kV=0.23 kW=2.5 pf=0.98
+
+New Generator.PV_B1a Bus1=brB1.1 phases=1 kV=0.23 kW=6.6 pf=1.0
+New Generator.PV_B1b Bus1=brB1.3 phases=1 kV=0.23 kW=6.6 pf=1.0
+
+! --- Node B2 (100m): 4 houses, 3 with solar ---
+New Load.House_B2a Bus1=brB2.1 phases=1 kV=0.23 kW=3.0 pf=0.96
+New Load.House_B2b Bus1=brB2.2 phases=1 kV=0.23 kW=3.3 pf=0.97
+New Load.House_B2c Bus1=brB2.3 phases=1 kV=0.23 kW=2.6 pf=0.95
+New Load.House_B2d Bus1=brB2.2 phases=1 kV=0.23 kW=3.1 pf=0.96
+
+New Generator.PV_B2a Bus1=brB2.1 phases=1 kV=0.23 kW=6.6 pf=1.0
+New Generator.PV_B2b Bus1=brB2.2 phases=1 kV=0.23 kW=6.6 pf=1.0
+New Generator.PV_B2c Bus1=brB2.3 phases=1 kV=0.23 kW=6.6 pf=1.0
+
+! --- Node B3 (150m): 4 houses, 2 with solar ---
+New Load.House_B3a Bus1=brB3.1 phases=1 kV=0.23 kW=2.7 pf=0.95
+New Load.House_B3b Bus1=brB3.2 phases=1 kV=0.23 kW=3.4 pf=0.97
+New Load.House_B3c Bus1=brB3.3 phases=1 kV=0.23 kW=3.0 pf=0.96
+New Load.House_B3d Bus1=brB3.1 phases=1 kV=0.23 kW=2.9 pf=0.98
+
+New Generator.PV_B3a Bus1=brB3.2 phases=1 kV=0.23 kW=6.6 pf=1.0
+New Generator.PV_B3b Bus1=brB3.3 phases=1 kV=0.23 kW=6.6 pf=1.0
+
+! --- Node B4 (200m): 4 houses, 3 with solar, NO battery ---
+New Load.House_B4a Bus1=brB4.1 phases=1 kV=0.23 kW=3.1 pf=0.96
+New Load.House_B4b Bus1=brB4.2 phases=1 kV=0.23 kW=2.9 pf=0.95
+New Load.House_B4c Bus1=brB4.3 phases=1 kV=0.23 kW=3.3 pf=0.97
+New Load.House_B4d Bus1=brB4.1 phases=1 kV=0.23 kW=2.7 pf=0.96
+
+New Generator.PV_B4a Bus1=brB4.1 phases=1 kV=0.23 kW=6.6 pf=1.0
+New Generator.PV_B4b Bus1=brB4.2 phases=1 kV=0.23 kW=6.6 pf=1.0
+New Generator.PV_B4c Bus1=brB4.3 phases=1 kV=0.23 kW=6.6 pf=1.0
+
+
+! === System settings ===
+Set Voltagebases=[11, 0.4]
+CalcVoltageBases
+Set defaultbasefrequency=50

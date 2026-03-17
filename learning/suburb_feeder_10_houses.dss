@@ -1,0 +1,68 @@
+! ============================================================
+! Suburban Feeder — Community Battery Study
+! ============================================================
+! Topology:
+!   11kV source → 200kVA transformer → LV bus (400V 3-phase)
+!   → Main trunk → Junction
+!     ├── Branch A (5 houses, 3 with solar, community battery)
+!     └── Branch B (5 houses, 3 with solar)
+!
+! Australian standards: 230V phase-neutral, 50Hz
+! Voltage limits: AS 61000.3.100 → 230V +10%/-6% (216–253V)
+! ============================================================
+
+Clear
+
+! --- Source: 11kV medium voltage network (stiff grid) ---
+New Circuit.Suburb basekv=11 pu=1.0 phases=3 frequency=50
+
+! --- Distribution transformer: 11kV/0.4kV, 200 kVA ---
+! Typical pole-mount transformer serving ~10–15 houses
+New Transformer.Tx1 phases=3 windings=2
+~ wdg=1 bus=sourcebus kV=11   kVA=200
+~ wdg=2 bus=lv_bus    kV=0.4  kVA=200
+~ %loadloss=1.5 %noloadloss=0.3 XHL=4.0
+
+! --- Main trunk cable: LV bus to junction (50m, 3-phase) ---
+! Typical underground LV cable: 95mm² Al, R≈0.32 Ω/km, X≈0.08 Ω/km
+New Line.Trunk Bus1=lv_bus Bus2=junction phases=3 length=0.05
+~ R1=0.32 X1=0.08 R0=0.52 X0=0.12
+
+! === BRANCH A: 5 houses + community battery ===
+New Line.BranchA Bus1=junction.1.2.3 Bus2=brA.1.2.3 phases=3 length=0.1
+~ R1=0.64 X1=0.10 R0=0.84 X0=0.15
+
+New Load.House_A1 Bus1=brA.1 phases=1 kV=0.23 kW=3.0 pf=0.97
+New Load.House_A2 Bus1=brA.2 phases=1 kV=0.23 kW=2.5 pf=0.95
+New Load.House_A3 Bus1=brA.3 phases=1 kV=0.23 kW=3.5 pf=0.96
+New Load.House_A4 Bus1=brA.1 phases=1 kV=0.23 kW=2.0 pf=0.98
+New Load.House_A5 Bus1=brA.2 phases=1 kV=0.23 kW=2.8 pf=0.95
+
+New Generator.PV_A1 Bus1=brA.1 phases=1 kV=0.23 kW=5.0 pf=1.0
+New Generator.PV_A2 Bus1=brA.2 phases=1 kV=0.23 kW=5.0 pf=1.0
+New Generator.PV_A3 Bus1=brA.3 phases=1 kV=0.23 kW=5.0 pf=1.0
+
+New Storage.CommunityBatt Bus1=brA phases=3 kV=0.4
+~ kWRated=100 kWhRated=200 kWhStored=100
+~ %EffCharge=95 %EffDischarge=95
+~ %reserve=10 %IdlingkW=0.5
+~ State=IDLING
+
+! === BRANCH B: identical to Branch A, no battery (control group) ===
+New Line.BranchB Bus1=junction.1.2.3 Bus2=brB.1.2.3 phases=3 length=0.1
+~ R1=0.64 X1=0.10 R0=0.84 X0=0.15
+
+New Load.House_B1 Bus1=brB.1 phases=1 kV=0.23 kW=3.0 pf=0.97
+New Load.House_B2 Bus1=brB.2 phases=1 kV=0.23 kW=2.5 pf=0.95
+New Load.House_B3 Bus1=brB.3 phases=1 kV=0.23 kW=3.5 pf=0.96
+New Load.House_B4 Bus1=brB.1 phases=1 kV=0.23 kW=2.0 pf=0.98
+New Load.House_B5 Bus1=brB.2 phases=1 kV=0.23 kW=2.8 pf=0.95
+
+New Generator.PV_B1 Bus1=brB.1 phases=1 kV=0.23 kW=5.0 pf=1.0
+New Generator.PV_B2 Bus1=brB.2 phases=1 kV=0.23 kW=5.0 pf=1.0
+New Generator.PV_B3 Bus1=brB.3 phases=1 kV=0.23 kW=5.0 pf=1.0
+
+! === System settings ===
+Set Voltagebases=[11, 0.4]
+CalcVoltageBases
+Set defaultbasefrequency=50
