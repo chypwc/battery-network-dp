@@ -43,13 +43,13 @@ When charging, the grid delivers $a \cdot \Delta t$ kWh but only $\eta_c \cdot a
 
 ### Reward Function
 
-$$r(s, a, p_t) = -\frac{p_t}{1000} \cdot a \cdot \Delta t \;-\; c_{\text{deg}} \cdot |a| \cdot \Delta t$$
+$$r(s, a, p_t) = -\frac{p_t}{1000} \cdot a \cdot \Delta t - c_{\text{deg}} \cdot |a| \cdot \Delta t$$
 
 The first term is arbitrage revenue. When charging ($a > 0$), the battery buys electricity at price $p_t$, producing a cost (negative reward). When discharging ($a < 0$), the battery sells electricity, producing income (positive reward). The second term is battery degradation cost ( $c_{\text{deg}} = 0.02$ A\$/kWh throughput), representing the shortened battery lifetime from cycling.
 
 ### Feasible Action Set
 
-$$\mathcal{A}(s, t) = \left\lbrace a \in [-\bar{a},\, \bar{a}] \;\mid\; s_{\min} \leq s' \leq s_{\max} \right\rbrace$$
+$$\mathcal{A}(s, t) = \left\lbrace a \in [-\bar{a}, \bar{a}] \mid s_{\min} \leq s' \leq s_{\max} \right\rbrace$$
 
 Actions are bounded by the dispatch limit $\bar{a}$ (kW) and by the requirement that the next SoC stays within the battery's operating range: $s_{\min} = 0.1 \times E_{\text{rated}}$ (reserve) to $s_{\max} = E_{\text{rated}}$ (full capacity).
 
@@ -176,7 +176,7 @@ return dispatch
 
 When constraints are active, the DP's feasible action set is restricted:
 
-$$\mathcal{A}_c(s, t) = \left\lbrace a \in \mathcal{A}(s,t) \;\mid\; a \leq a_{\min}^{\text{dis}}(t),\; a \leq a_{\max}^{\text{chg}}(t),\; s' \geq s_{\min}^{\text{net}}(t{+}1) \right\rbrace$$
+$$\mathcal{A}_c(s, t) = \left\lbrace a \in \mathcal{A}(s,t) \mid a \leq a_{\min}^{\text{dis}}(t), a \leq a_{\max}^{\text{chg}}(t), s' \geq s_{\min}^{\text{net}}(t{+}1) \right\rbrace$$
 
 | Constraint | Source | Purpose |
 |------------|--------|---------|
