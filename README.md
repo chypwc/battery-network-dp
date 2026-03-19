@@ -106,7 +106,7 @@ $$\mathcal{A}_c(s, t) = \lbrace a \in \mathcal{A}(s,t) \mid a \leq a_{\min}^{\te
 
 The minimum discharge power at each violation period is determined by binary search in OpenDSS.
 
-For full mathematical details of the DP solver, feedback loop, Q-learning update rule, two-phase training, and hyperparameter configurations, see [methods.md](doc/methods.md).
+For full mathematical details of the DP solver, feedback loop, Q-learning update rule, two-phase training, and hyperparameter configurations, see [docs/methods.md](docs/methods.md).
 
 ## Distribution Network Model
 
@@ -225,7 +225,7 @@ Losses represent electrical energy dissipated as heat in cables and the transfor
 
 **7. RL reduces network losses by 4–14%.** The oscillating strategy uses lower sustained current than DP's aggressive dispatch. The DNSP benefits from both fewer violations and lower loss costs.
 
-For the policy implications, see [policy implications.md](doc/policy%20implications.md).
+For the policy implications, see [docs/policy implications.md](docs/policy%20implications.md).
 
 ### How Q-Learning Eliminates Violations
 
@@ -248,6 +248,25 @@ t=42  −15 kW (final discharge)
 Each discharge period injects power into the feeder, lifting voltage above 0.94 pu. Each charge period refills just enough energy for the next discharge. The strategy is revenue-negative (~A\$0.50 loss per cycle) but prevents the most severe voltage violations. The oscillation pattern adapts to battery capacity: 200 kWh batteries require 3–4 cycles, 300 kWh need 1–2 cycles, and 400 kWh batteries can sustain discharge with minor adjustments.
 
 These strategies require knowledge of the voltage response to battery actions — knowledge that only exists in the OpenDSS power flow model. The DP feedback loop cannot discover the oscillating strategy because it is revenue-suboptimal at every individual time step.
+
+### NPV Analysis
+
+A 20-year discounted cash flow model evaluates the investment case for the 200 kWh and 400 kWh batteries at ±80kW with RL dispatch. Cost data is sourced from CSIRO GenCost 2025, AER RORI 2025 (6.53% discount rate), and Evoenergy's 2024 Tariff Structure Statement.
+
+| Metric | 200 kWh | 400 kWh |
+|--------|---------|---------|
+| Capital cost | A\$116,000 | A\$162,400 |
+| Year 1 net cash flow | A\$11,729 | A\$16,216 |
+| Simple payback | 9.4 years | 9.3 years |
+| NPV (20 years, arbitrage only) | -A\$17,328 | -A\$32,655 |
+| NPV + avoided augmentation | **+A\$3,767** | -A\$11,560 |
+
+The 200 kWh battery is marginally viable (+A\$3,767) when including the present value of deferred network augmentation (A\$21,095). The 400 kWh battery remains negative despite higher revenue because its module replacement cost at year 12 (A\$67,200 vs A\$39,000) outweighs the extra revenue. Both achieve 0 violations with RL dispatch, so the extra capacity provides no additional network benefit.
+
+The business case is sensitive to revenue assumptions — our model uses a single typical price day that may overstate annual average revenue. Additional revenue streams (FCAS, DNSP network support payments) would close the gap. Falling battery costs (GenCost projects A\$306/kWh by 2035) will further improve the economics.
+
+For full model details, equations, and sensitivity analysis, see [docs/npv_analysis.md](docs/npv_analysis.md).
+
 
 ## Project Structure
 
