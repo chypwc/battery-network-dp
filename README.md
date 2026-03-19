@@ -245,6 +245,22 @@ Each discharge period injects power into the feeder, lifting voltage above 0.94 
 
 These strategies require knowledge of the voltage response to battery actions — knowledge that only exists in the OpenDSS power flow model. The DP feedback loop cannot discover the oscillating strategy because it is revenue-suboptimal at every individual time step.
 
+### Branch A vs Branch B: Battery Spillover Effect
+
+The feeder has two identical branches — Branch A (with battery at Node A4) and Branch B (no battery). The branch comparison tests whether a single battery protects the entire feeder or only its own branch.
+
+| Config | A4 Violations | B4 Violations | A4 V_min (pu) | B4 V_min (pu) | B4 Avg Lift |
+|--------|:---:|:---:|:---:|:---:|:---:|
+| **Baseline (no battery)** | **11** | **11** | **0.9285** | **0.9285** | **—** |
+| RL ±50kW / 200kWh | 0 | 0 | 0.9455 | 0.9413 | +0.0071 pu |
+| RL ±80kW / 200kWh | 0 | 0 | 0.9455 | 0.9413 | +0.0083 pu |
+| RL ±80kW / 400kWh | 0 | 0 | 0.9455 | 0.9413 | +0.0125 pu |
+| RL ±100kW / 400kWh | 0 | 0 | 0.9476 | 0.9406 | +0.0137 pu |
+
+A single battery on Branch A eliminates all 11 violations on both branches across every tested configuration. The mechanism is junction voltage rise: when the battery discharges at Node A4, current flows backward through the Branch A cables to the junction bus, raising its voltage. Since Branch B connects to the same junction, B4 voltage also rises.
+
+The B4 improvement is consistently ~47% of the A4 improvement, determined by the feeder impedance structure: the trunk cable (150m) accounts for roughly half the total impedance from transformer to end-of-branch (350m). The margins at B4 are thin — V_min of 0.9406–0.9416 pu sits only 0.1–0.2% above the 0.94 limit. On feeders with longer branches or asymmetric loading, a single battery may not provide sufficient spillover, and central placement (at the junction) or multiple batteries may be required.
+
 ## Project Structure
 
 ```

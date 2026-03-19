@@ -180,3 +180,60 @@ The cost increases with dispatch limit: ±100kW configurations sacrifice more re
 | SoC bins | 80 (±80kW), 100–120 (±100kW) | same |
 | Actions | 33 (±80kW, ±100kW), 21 (±50kW) | same |
 | Q-table init | DP value function | Phase 1 output |
+
+## Branch A vs Branch B: Battery Spillover Analysis
+
+The study feeder has two identical branches — Branch A (battery at Node A4) and Branch B (no battery, control group). This design tests whether a single community battery provides localised or feeder-wide voltage support.
+
+### Results
+
+| Config | Method | A4 Violations | B4 Violations | A4 V_min (pu) | B4 V_min (pu) | B4 Avg Lift |
+|--------|--------|:---:|:---:|:---:|:---:|:---:|
+| **Baseline** | **—** | **11** | **11** | **0.9285** | **0.9285** | **—** |
+| ±50kW / 200kWh | DP | 4 | 4 | 0.9264 | 0.9267 | +0.0055 pu |
+| ±50kW / 200kWh | RL | 0 | 0 | 0.9455 | 0.9413 | +0.0071 pu |
+| ±80kW / 200kWh | DP | 5 | 6 | 0.9264 | 0.9267 | +0.0069 pu |
+| ±80kW / 200kWh | RL | 0 | 0 | 0.9455 | 0.9413 | +0.0083 pu |
+| ±80kW / 400kWh | DP | 3 | 3 | 0.9308 | 0.9286 | +0.0122 pu |
+| ±80kW / 400kWh | RL | 0 | 0 | 0.9455 | 0.9413 | +0.0125 pu |
+| ±100kW / 400kWh | DP | 4 | 4 | 0.9264 | 0.9267 | +0.0120 pu |
+| ±100kW / 400kWh | RL | 0 | 0 | 0.9476 | 0.9406 | +0.0137 pu |
+
+### Mechanism: Junction Voltage Rise
+
+When the battery discharges at Node A4, current flows backward through the Branch A cables toward the junction bus. This raises the junction voltage, which propagates to Branch B. The voltage improvement at B4 is approximately 47% of the improvement at A4, determined by the feeder impedance ratio:
+```
+Trunk cable:   150m  (impedance from transformer to junction)
+Branch cable:  200m  (impedance from junction to end-of-branch)
+Total:         350m
+
+Junction rise / A4 rise ≈ trunk impedance / total impedance ≈ 150/350 ≈ 43%
+B4 rise / A4 rise ≈ 47% (measured across all configurations)
+```
+
+At the critical evening period t=35 (17:30):
+
+| Config | A4 voltage lift | B4 voltage lift | Ratio |
+|--------|:---:|:---:|:---:|
+| RL ±50kW / 200kWh | +0.0381 pu | +0.0170 pu | 45% |
+| RL ±80kW / 200kWh | +0.0618 pu | +0.0289 pu | 47% |
+| RL ±80kW / 400kWh | +0.0618 pu | +0.0289 pu | 47% |
+| RL ±100kW / 400kWh | +0.0770 pu | +0.0365 pu | 47% |
+
+### Key Findings
+
+**1. A single battery protects both branches.** Across all four RL configurations, the battery on Branch A eliminates all 11 violations on both A4 and B4. The DNSP does not need one battery per branch — one well-placed battery per feeder is sufficient.
+
+**2. DP leaves residual violations on both branches; RL eliminates all.** Under DP dispatch, B4 has 3–6 remaining violations because the battery empties before the evening peak ends. The RL's oscillating strategy maintains discharge through the full evening, keeping both branches above the 0.94 pu limit.
+
+**3. Branch B margins are thin.** B4 minimum voltage under RL is 0.9406–0.9416 pu — only 0.1–0.2% above the 0.94 limit. A4 has a more comfortable margin at 0.9455–0.9476 pu. Branch B is the marginal constraint: if the feeder had longer branches, higher Branch B loads, or more than two branches, the spillover might be insufficient.
+
+**4. Higher dispatch power improves spillover.** The B4 average voltage lift increases with dispatch limit: +0.0071 pu at ±50kW to +0.0137 pu at ±100kW. This is because higher discharge power drives more current through the trunk cable, producing a larger junction voltage rise. However, the additional lift has diminishing returns — ±80kW provides most of the benefit.
+
+### Implications for Battery Placement
+
+The 47% attenuation ratio is specific to this feeder's 150m trunk / 200m branch geometry. On feeders with different topologies:
+
+- **Short trunk, long branches** (e.g., 50m trunk, 300m branch): attenuation ratio drops to ~15%. A single battery may not protect the opposite branch. Multiple batteries or central placement at the junction would be needed.
+- **Long trunk, short branches** (e.g., 250m trunk, 100m branch): attenuation ratio rises to ~70%. A single battery provides strong feeder-wide support.
+- **Three or more branches**: the junction voltage rise is shared across all branches, but each branch's own cable drop remains. Central placement or coordinated multi-battery dispatch becomes the research question.
