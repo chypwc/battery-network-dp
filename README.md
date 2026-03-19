@@ -106,6 +106,8 @@ $$\mathcal{A}_c(s, t) = \lbrace a \in \mathcal{A}(s,t) \mid a \leq a_{\min}^{\te
 
 The minimum discharge power at each violation period is determined by binary search in OpenDSS.
 
+For full mathematical details of the DP solver, feedback loop, Q-learning update rule, two-phase training, and hyperparameter configurations, see [methods.md](doc/methods.md).
+
 ## Distribution Network Model
 
 ### Feeder Topology
@@ -181,7 +183,7 @@ These violations occur at Nodes A4 and B4 (end-of-feeder, furthest from the tran
 
 | Config | DP Revenue | DP Violations | RL Revenue | RL Violations | Revenue Gap |
 |--------|-----------|--------------|-----------|--------------|-------------|
-| **Baseline (no battery)** | — | **11** | — | **-** | — |
+| **Baseline (no battery)** | **—** | **11** | **—** | **—** | **—** |
 | ±50kW / 200kWh | A\$28.38 | 4 | A\$24.98 | **0** | -A\$3.40 |
 | ±50kW / 300kWh | A\$32.69 | 0 | A\$32.55 | 0 | -A\$0.14 |
 | ±50kW / 400kWh | A\$35.92 | 0 | A\$35.90 | 0 | -A\$0.02 |
@@ -223,6 +225,8 @@ Losses represent electrical energy dissipated as heat in cables and the transfor
 
 **7. RL reduces network losses by 4–14%.** The oscillating strategy uses lower sustained current than DP's aggressive dispatch. The DNSP benefits from both fewer violations and lower loss costs.
 
+For the policy implications, see [policy implications.md](doc/policy%20implications.md).
+
 ### How Q-Learning Eliminates Violations
 
 The Q-learning agent independently discovers three strategies that the revenue-maximising DP cannot find.
@@ -244,22 +248,6 @@ t=42  −15 kW (final discharge)
 Each discharge period injects power into the feeder, lifting voltage above 0.94 pu. Each charge period refills just enough energy for the next discharge. The strategy is revenue-negative (~A\$0.50 loss per cycle) but prevents the most severe voltage violations. The oscillation pattern adapts to battery capacity: 200 kWh batteries require 3–4 cycles, 300 kWh need 1–2 cycles, and 400 kWh batteries can sustain discharge with minor adjustments.
 
 These strategies require knowledge of the voltage response to battery actions — knowledge that only exists in the OpenDSS power flow model. The DP feedback loop cannot discover the oscillating strategy because it is revenue-suboptimal at every individual time step.
-
-### Branch A vs Branch B: Battery Spillover Effect
-
-The feeder has two identical branches — Branch A (with battery at Node A4) and Branch B (no battery). The branch comparison tests whether a single battery protects the entire feeder or only its own branch.
-
-| Config | A4 Violations | B4 Violations | A4 V_min (pu) | B4 V_min (pu) | B4 Avg Lift |
-|--------|:---:|:---:|:---:|:---:|:---:|
-| **Baseline (no battery)** | **11** | **11** | **0.9285** | **0.9285** | **—** |
-| RL ±50kW / 200kWh | 0 | 0 | 0.9455 | 0.9413 | +0.0071 pu |
-| RL ±80kW / 200kWh | 0 | 0 | 0.9455 | 0.9413 | +0.0083 pu |
-| RL ±80kW / 400kWh | 0 | 0 | 0.9455 | 0.9413 | +0.0125 pu |
-| RL ±100kW / 400kWh | 0 | 0 | 0.9476 | 0.9406 | +0.0137 pu |
-
-A single battery on Branch A eliminates all 11 violations on both branches across every tested configuration. The mechanism is junction voltage rise: when the battery discharges at Node A4, current flows backward through the Branch A cables to the junction bus, raising its voltage. Since Branch B connects to the same junction, B4 voltage also rises.
-
-The B4 improvement is consistently ~47% of the A4 improvement, determined by the feeder impedance structure: the trunk cable (150m) accounts for roughly half the total impedance from transformer to end-of-branch (350m). The margins at B4 are thin — V_min of 0.9406–0.9416 pu sits only 0.1–0.2% above the 0.94 limit. On feeders with longer branches or asymmetric loading, a single battery may not provide sufficient spillover, and central placement (at the junction) or multiple batteries may be required.
 
 ## Project Structure
 
