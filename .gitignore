@@ -1,0 +1,4 @@
+__pycache__/
+.npz
+.pytest_cache
+.venv

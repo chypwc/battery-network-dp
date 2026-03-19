@@ -173,6 +173,8 @@ class DPSolver:
             'revenue': revenue,
             'total_revenue': np.sum(revenue),
             'prices': prices,
+            'value_function': V,
+            'policy': policy,
         }
 
 if __name__ == '__main__':
