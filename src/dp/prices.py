@@ -147,3 +147,32 @@ def load_day_prices(csv_path):
     elif 'price' in df.columns:
         return df['price'].values.astype(float)
     return df.iloc[:, 0].values.astype(float) # fall back to the first column
+
+
+def build_tou_profile():
+    """
+    ActewAGL Home Daytime Economy tariff (from 1 July 2025).
+    Aligns with Evoenergy proposed residential TOU Code 017.
+    
+    Source: ActewAGL ACT Standard plan electricity prices,
+    Schedule of charges from 1 July 2025.
+    
+    Returns:
+        numpy array of 48 prices in A$/MWh
+    """
+    SOLAR_SOAK = 176.0  # A$ 0.176 /kWh -> A$ 176 /MWh
+    SHOULDER = 319.0    # A$ 0.319 /kWh -> A$ 176 /MWh
+    PEAK = 485.0        # A$ 0.4848 /kWh -> A$ 485 /MWh
+
+    prices = np.full(48, SHOULDER)  # default to shoulder
+
+    # Solar soak: 11am-3pm (t=22 to t=29)
+    prices[22:30] = SOLAR_SOAK
+
+    # Morning peak: 7am-9am (t=14 to t=17)
+    prices[14:18] = PEAK
+
+    # Evening peak: 5pm-9pm (t=34 to t=41)
+    prices[34:42] = PEAK
+
+    return prices

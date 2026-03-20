@@ -4,17 +4,44 @@
 
 Community batteries are shared energy storage systems installed on suburban distribution networks, charging from rooftop solar during the day and discharging during evening peak demand. They provide two forms of value: **arbitrage revenue** (buying electricity when cheap, selling when expensive) and **network support** (preventing voltage violations that would otherwise require costly infrastructure upgrades).
 
-This project builds a decision-support tool that jointly optimises these two objectives using two complementary methods. A dynamic programming (DP) solver finds the revenue-maximising battery dispatch schedule using real NEM spot prices. A Q-learning agent extends this by embedding network voltage constraints directly into the reward signal, discovering dispatch strategies that are both profitable and network-safe.
+This project builds a decision-support tool that jointly optimises these two objectives using two complementary methods. A dynamic programming (DP) solver finds the revenue-maximising battery dispatch schedule. A Q-learning agent extends this by embedding network voltage constraints directly into the reward signal, discovering dispatch strategies that are both profitable and network-safe.
 
-Both methods are verified against an OpenDSS power flow model of a representative 32-house Australian suburban feeder with high rooftop solar penetration. The tool produces concrete sizing and dispatch recommendations: what battery capacity is needed, what dispatch limit should the network operator impose, and what is the revenue cost of network safety.
+The tool evaluates two alternative business models that determine the price signal the battery responds to:
+
+| | Model A: Wholesale Spot | Model B: Retail TOU |
+|---|---|---|
+| **Owner** | Market participant | Community group or third-party |
+| **Price signal** | NEM spot price (volatile, changes every 5 min) | ActewAGL retail TOU rate (fixed, published annually) |
+| **Revenue type** | Cash settlement with AEMO | Bill reduction for participating households |
+| **Trades with** | AEMO directly | No trading — offsets retail bills |
+
+**Model A** represents a battery operator registered as a NEM market participant who buys and sells electricity at the wholesale spot price. Revenue depends on the daily price spread, which varies significantly across days and seasons. This model also incurs a separate network tariff payable to the distribution network operator (Evoenergy).
+
+**Model B** represents a community-owned or third-party-operated battery that sits behind participating households' meters. It charges when the retail rate is lowest (solar soak period, 11am–3pm) and discharges when the rate is highest (peak periods, 7am–9am and 5pm–9pm), reducing each household's electricity bill. The retail rate already bundles wholesale energy, network charges, and retail margin — there is no separate network tariff. The price signal is the ActewAGL Home Daytime Economy tariff, which aligns with Evoenergy's proposed residential TOU network tariff (Code 017) for the 2024–29 regulatory period.
+
+Both models are verified against an OpenDSS power flow model of a representative 32-house Australian suburban feeder with high rooftop solar penetration. The tool produces concrete sizing and dispatch recommendations: what battery capacity is needed, what dispatch limit should the network operator impose, and what is the revenue cost of network safety — under each business model.
 
 ## Battery Dispatch Optimisation
 
 ### The Arbitrage Problem
 
-NEM spot prices vary throughout the day — low during midday solar surplus (sometimes negative), high during evening peak demand. A battery operator maximises revenue by charging when prices are low and discharging when prices are high. The challenge is deciding, at each half-hour, how much to charge or discharge given the current state of charge, the current price, and the knowledge that future prices may be higher or lower.
+A battery operator maximises revenue by charging when electricity is cheap and discharging when it is expensive. The challenge is deciding, at each half-hour, how much to charge or discharge given the current state of charge, the current price, and the knowledge that future prices may be higher or lower.
 
-This is a finite-horizon deterministic dynamic programming problem. The price sequence is known in advance (day-ahead or historical), the battery physics are deterministic, and the planning horizon is one day (48 half-hour periods).
+The price signal depends on the business model:
+
+**Model A (Wholesale Spot).** NEM spot prices vary throughout the day — low during midday solar surplus (sometimes negative), high during evening peak demand. The price sequence is volatile and differs every day. A typical ACT day shows prices ranging from -A\$14/MWh at midday to A\$230/MWh at the morning peak, a spread of approximately A\$245/MWh. The optimal dispatch changes daily because the price profile is different each day.
+
+**Model B (Retail TOU).** The ActewAGL Home Daytime Economy tariff defines three fixed price tiers (GST exclusive, from 1 July 2025):
+
+| Period | Time (AEST) | Rate | A\$/MWh |
+|--------|-------------|------|:---:|
+| Solar soak | 11am–3pm | 16.00 c/kWh | 160 |
+| Shoulder | 9pm–7am, 9am–11am, 3pm–5pm | 29.00 c/kWh | 290 |
+| Peak | 7am–9am, 5pm–9pm | 44.07 c/kWh | 441 |
+
+The spread between solar soak and peak is A\$281/MWh — wider than the typical spot day and guaranteed every day. The optimal dispatch is the same every day because the tariff structure is fixed: charge during solar soak, discharge during morning and evening peaks.
+
+Under both models, this is a finite-horizon deterministic dynamic programming problem. The price sequence is known in advance (day-ahead spot prices for Model A; published tariff schedule for Model B), the battery physics are deterministic, and the planning horizon is one day (48 half-hour periods).
 
 ### Bellman Equation
 
@@ -29,9 +56,21 @@ with terminal condition $V_T(s) = 0$ for all $s$.
 | $t$ | `t` | Time step (0 = 00:00, ..., 47 = 23:30) |
 | $s$ | `soc` | State of charge (kWh) |
 | $a$ | `action_kw` | Charge (+kW) or discharge (−kW) |
-| $p_t$ | `prices[t]` | NEM spot price (A\$/MWh) |
+| $p_t$ | `prices[t]` | Price at time $t$ (A\$/MWh) |
 | $s'$ | `s_next` | SoC after action $a$ |
 | $V_t(s)$ | `V[t][i]` | Max future revenue from state $s$ at time $t$ |
+
+The Bellman equation is identical for both business models — only the price vector $p_t$ changes. Under Model A, $p_t$ is the NEM spot price downloaded from AEMO. Under Model B, $p_t$ is the ActewAGL retail TOU rate constructed from the published tariff schedule:
+
+```python
+# Model A: volatile, different every day
+prices_spot = load_day_prices('data/aemo/prices_typical_2024-06-28.csv')
+
+# Model B: fixed, same every day
+prices_tou = build_tou_profile()  # [160, 160, ..., 290, ..., 441, ...]
+```
+
+This separation of optimisation algorithm from price signal is a key design feature. The same DP solver, Q-learning agent, and OpenDSS network model are reused across business models — only the 48-element price vector changes.
 
 ### State Transition
 
@@ -47,6 +86,8 @@ $$r(s, a, p_t) = -\frac{p_t}{1000} \cdot a \cdot \Delta t - c_{\text{deg}} \cdot
 
 The first term is arbitrage revenue. When charging ($a > 0$), the battery buys electricity at price $p_t$, producing a cost (negative reward). When discharging ($a < 0$), the battery sells electricity, producing income (positive reward). The second term is battery degradation cost ($c_{\text{deg}} = 0.02$ A\$/kWh throughput), representing the shortened battery lifetime from cycling.
 
+Under Model A, $p_t$ is the NEM spot price and the revenue represents direct cash settlement with AEMO. Under Model B, $p_t$ is the retail TOU rate and the "revenue" represents the reduction in participating households' electricity bills — the battery avoids buying expensive peak electricity by discharging stored solar soak energy.
+
 ### Feasible Action Set
 
 $$\mathcal{A}(s, t) = \lbrace a \in [-\bar{a}, \bar{a}] \mid s_{\min} \leq s' \leq s_{\max} \rbrace$$
@@ -59,7 +100,9 @@ The SoC and action spaces are discretised into $n_s$ and $n_a$ evenly spaced gri
 
 ### Price Data
 
-Real AEMO NSW1 spot prices (the ACT falls within the NSW1 NEM region). Data is downloaded from AEMO's public aggregated price and demand portal at 5-minute dispatch resolution, then resampled to 30-minute settlement periods by averaging six consecutive dispatch prices.
+**Model A:** Real AEMO NSW1 spot prices (the ACT falls within the NSW1 NEM region). Data is downloaded from AEMO's public aggregated price and demand portal at 5-minute dispatch resolution, then resampled to 30-minute settlement periods by averaging six consecutive dispatch prices.
+
+**Model B:** ActewAGL Home Daytime Economy tariff rates from the ACT Standard plan electricity prices schedule (from 1 July 2025). The tariff aligns with Evoenergy's proposed residential TOU network tariff (Code 017) under the Revised Tariff Structure Statement for the 2024–29 regulatory period.
 
 ### Q-Learning Extension
 
@@ -93,6 +136,8 @@ Both the learning rate $\alpha_t$ and exploration rate $\epsilon_t$ decay expone
 Phase 1 uses penalty=0 and skips OpenDSS calls entirely, running approximately 100x faster than Phase 2. The Q-table is initialised from the DP value function: for each SoC bin and time step, the DP's optimal action receives a Q-value equal to the interpolated value $V_t(s)$. This gives the agent a strong arbitrage foundation without requiring hundreds of thousands of exploration episodes.
 
 Phase 2 enables OpenDSS and introduces the violation penalty. The agent starts with a profitable strategy from Phase 1 and makes targeted adjustments at violation periods. Lower initial epsilon (0.1) protects the good arbitrage strategy while allowing exploration at critical evening periods.
+
+The two-phase approach applies to both business models. Under Model A, Phase 1 learns spot price arbitrage patterns. Under Model B, Phase 1 learns TOU arbitrage patterns (charge during solar soak, discharge during peaks). In both cases, Phase 2 refines the dispatch for network feasibility using the same OpenDSS environment — the network physics are identical regardless of which price signal the battery responds to.
 
 **Network-constrained feasible set (feedback loop).** When the DP feedback loop is used instead of Q-learning, the feasible set is restricted by heuristic constraints:
 
@@ -167,7 +212,9 @@ These violations occur at Nodes A4 and B4 (end-of-feeder, furthest from the tran
 
 ## Results
 
-### DP Sensitivity: Dispatch Limit x Battery Capacity
+### Model A: Wholesale Spot Arbitrage
+
+#### DP Sensitivity: Dispatch Limit x Battery Capacity
 
 | Limit | Capacity | Revenue/day | Violations | Eliminated | Losses (kWh) |
 |-------|----------|-------------|-----------|------------|--------------|
@@ -179,7 +226,7 @@ These violations occur at Nodes A4 and B4 (end-of-feeder, furthest from the tran
 | ±80kW | 400kWh   | A\$48       | 3         | 8/11       | 79.1         |
 | ±100kW| 400kWh   | A\$39       | 3         | 8/11       | 86.4         |
 
-### DP vs Q-Learning: Head-to-Head
+#### DP vs Q-Learning: Head-to-Head
 
 | Config | DP Revenue | DP Violations | RL Revenue | RL Violations | Revenue Gap |
 |--------|-----------|--------------|-----------|--------------|-------------|
@@ -194,7 +241,7 @@ These violations occur at Nodes A4 and B4 (end-of-feeder, furthest from the tran
 | ±100kW / 300kWh | A\$50.54 | 10 | A\$44.53 | **0** | -A\$6.00 |
 | ±100kW / 400kWh | A\$56.56 | 10 | A\$48.51 | **0** | -A\$8.05 |
 
-### Network Impact
+#### Network Impact
 
 | Config | DP Losses | RL Losses | Reduction | DP Peak Tx | RL Peak Tx |
 |--------|----------|----------|-----------|-----------|-----------|
@@ -209,7 +256,7 @@ These violations occur at Nodes A4 and B4 (end-of-feeder, furthest from the tran
 
 Losses represent electrical energy dissipated as heat in cables and the transformer. When current flows through a conductor with resistance $R$, the power lost is $P_{\text{loss}} = I^2 R$. Higher battery dispatch power drives higher current, increasing losses quadratically. RL consistently reduces losses compared to DP because the oscillating evening strategy uses lower sustained current than DP's aggressive continuous discharge.
 
-### Key Findings
+### Key Findings (Model A)
 
 **1. Q-learning achieves 0 violations across all configurations.** DP achieves 0 violations in only 2 of 9 configurations (±50kW with 300+ kWh). Q-learning eliminates all violations by learning the voltage response to battery actions through direct interaction with the OpenDSS network model.
 
@@ -251,21 +298,76 @@ These strategies require knowledge of the voltage response to battery actions �
 
 ### NPV Analysis
 
-A 20-year discounted cash flow model evaluates the investment case for the 200 kWh and 400 kWh batteries at ±80kW with RL dispatch. Cost data is sourced from CSIRO GenCost 2025, AER RORI 2025 (6.53% discount rate), and Evoenergy's 2024 Tariff Structure Statement.
+A 20-year discounted cash flow model evaluates the investment case for the 200 kWh and 400 kWh batteries at ±80kW with RL dispatch. Cost data is sourced from CSIRO GenCost 2025, AER RORI 2025 (6.53% discount rate), and Evoenergy's 2024 Tariff Structure Statement. Costs (capital, O&M, module replacement) are identical across business models — only the revenue differs.
 
-| Metric | 200 kWh | 400 kWh |
-|--------|---------|---------|
-| Capital cost | A\$116,000 | A\$162,400 |
-| Year 1 net cash flow | A\$11,729 | A\$16,216 |
-| Simple payback | 9.4 years | 9.3 years |
-| NPV (20 years, arbitrage only) | -A\$17,328 | -A\$32,655 |
-| NPV + avoided augmentation | **+A\$3,767** | -A\$11,560 |
+**Model A (Spot) — ±80kW / 200kWh:**
 
-The 200 kWh battery is marginally viable (+A\$3,767) when including the present value of deferred network augmentation (A\$21,095). The 400 kWh battery remains negative despite higher revenue because its module replacement cost at year 12 (A\$67,200 vs A\$39,000) outweighs the extra revenue. Both achieve 0 violations with RL dispatch, so the extra capacity provides no additional network benefit.
+| Tier | NPV | Includes |
+|------|:---:|---------|
+| **Tier 1: Arbitrage only** | **-A\$29,969** | Operator revenue − costs (most realistic) |
+| Tier 2: + augmentation | -A\$8,874 | + deferred transformer, requires DNSP contract |
+| Tier 3: + aug + LRMC | +A\$3,767 | + export saving, theoretical maximum |
 
-The business case is sensitive to revenue assumptions — our model uses a single typical price day that may overstate annual average revenue. Additional revenue streams (FCAS, DNSP network support payments) would close the gap. Falling battery costs (GenCost projects A\$306/kWh by 2035) will further improve the economics.
+**Model B (TOU) — ±80kW / 200kWh:**
+
+| Tier | NPV | Includes |
+|------|:---:|---------|
+| **Tier 1: Arbitrage only** | **+A\$135,533** | Operator revenue − costs (most realistic) |
+| Tier 2: + augmentation | +A\$156,627 | Bonus if DNSP contract exists |
+| Tier 3: + aug + LRMC | +A\$169,269 | Theoretical maximum |
+
+**Tier 1** assumes the operator receives only arbitrage revenue (NEM spot settlement or retail TOU bill savings) with no payments from the distribution network operator. **Tier 2** adds a DNSP network support payment for deferring a specific A\$45,000 transformer upgrade by 10 years — a concrete, project-level benefit that could be contracted under the NER's non-network alternatives framework. **Tier 3** further adds the system-wide export LRMC saving (A\$1,150/yr), which reflects Evoenergy's average incremental cost of managing solar exports across the network — a more abstract value that is unlikely to appear in a practical contract.
 
 For full model details, equations, and sensitivity analysis, see [docs/npv_analysis.md](docs/npv_analysis.md).
+
+### Model B: Retail TOU Arbitrage
+
+#### DP vs Q-Learning: Head-to-Head (TOU)
+
+The same DP solver and Q-learning agent are applied with ActewAGL Home Daytime Economy retail TOU rates (GST exclusive, from 1 July 2025) as the price signal. The network model, battery physics, and violation thresholds are identical to Model A — only the 48-element price vector changes.
+
+| Config | TOU DP Revenue | DP Violations | TOU RL Revenue | RL Violations | Revenue Gap |
+|--------|:---:|:---:|:---:|:---:|:---:|
+| **Baseline (no battery)** | **—** | **11** | **—** | **—** | **—** |
+| ±50kW / 200kWh | A\$79.48 | 4 | A\$75.34 | **0** | -A\$4.14 |
+| ±50kW / 300kWh | A\$97.76 | 2 | A\$96.84 | **0** | -A\$0.92 |
+| ±50kW / 400kWh | A\$109.27 | 2 | A\$108.47 | **0** | -A\$0.80 |
+| ±80kW / 200kWh | A\$83.51 | 5 | A\$80.57 | **0** | -A\$2.94 |
+| ±80kW / 300kWh | A\$119.81 | 3 | A\$117.54 | **0** | -A\$2.27 |
+| ±80kW / 400kWh | A\$145.22 | 2 | A\$144.82 | **0** | -A\$0.40 |
+| ±100kW / 200kWh | A\$85.23 | 7 | A\$81.56 | **0** | -A\$3.67 |
+| ±100kW / 300kWh | A\$122.74 | 10 | A\$119.14 | **0** | -A\$3.60 |
+| ±100kW / 400kWh | A\$158.43 | 9 | A\$137.58 | **0** | -A\$20.85 |
+
+Q-learning again achieves **0 violations across all 9 configurations** under TOU prices, just as it does under spot prices. The TOU DP has violations in all 9 configurations (the TOU dispatch pattern differs from spot and creates violations at different times).
+
+#### Annual Revenue: Model A vs Model B (Violation-Free RL Only)
+
+| Config | Spot RL (A\$/yr) | TOU RL (A\$/yr) | TOU Advantage |
+|--------|:---:|:---:|:---:|
+| ±50kW / 200kWh | A\$9,662 | A\$27,499 | +A\$17,838 (2.8×) |
+| ±50kW / 300kWh | A\$11,934 | A\$35,348 | +A\$23,413 (3.0×) |
+| ±50kW / 400kWh | A\$13,103 | A\$39,592 | +A\$26,488 (3.0×) |
+| ±80kW / 200kWh | A\$12,542 | A\$29,408 | +A\$16,866 (2.3×) |
+| ±80kW / 300kWh | A\$15,513 | A\$42,904 | +A\$27,391 (2.8×) |
+| ±80kW / 400kWh | A\$17,860 | A\$52,861 | +A\$35,001 (3.0×) |
+| ±100kW / 200kWh | A\$13,254 | A\$29,769 | +A\$16,515 (2.2×) |
+| ±100kW / 300kWh | A\$16,254 | A\$43,486 | +A\$27,232 (2.7×) |
+| ±100kW / 400kWh | A\$17,706 | A\$50,217 | +A\$32,511 (2.8×) |
+
+The retail TOU business model produces **2–3× higher violation-free revenue** than wholesale spot arbitrage across all configurations. This is because the TOU price spread (A\$281/MWh between solar soak and peak) is wider than the typical spot day spread (A\$245/MWh), the peak rate applies for 12 half-hour periods per day (versus approximately 5 high-price periods for spot), and the TOU revenue is guaranteed every day while spot revenue varies.
+
+### Key Findings (Model B)
+
+**1. Q-learning achieves 0 violations under TOU prices.** The same two-phase training approach works: Phase 1 learns TOU arbitrage (charge during solar soak, discharge during peaks), Phase 2 adds OpenDSS violation penalties. The RL discovers similar voltage support strategies — morning pre-charging, conservative early evening discharge, and late evening oscillation — adapted to the TOU dispatch pattern.
+
+**2. The business model choice has a larger impact on viability than battery sizing.** The TOU advantage (2–3×) exceeds the effect of doubling battery capacity within either model. A 200 kWh battery under TOU (A\$29,408/yr) earns more than a 400 kWh battery under spot (A\$17,860/yr).
+
+**3. TOU revenue transforms the NPV.** At ±80kW/200kWh, TOU RL earns A\$29,408/year versus A\$12,542/year for spot RL. The 200 kWh battery's simple payback drops from 9.2 years (spot) to approximately 3.9 years (TOU). The TOU business model makes the community battery clearly viable without requiring augmentation deferral credits.
+
+**4. TOU DP has violations in all 9 configurations.** Unlike spot DP (which achieves 0 violations at ±50kW/300kWh and ±50kW/400kWh), TOU DP causes violations in every configuration because its dispatch pattern is different: it idles during the morning (shoulder rate, no incentive to discharge) while baseline violations occur at 06:00–06:30. Q-learning is essential for network-safe TOU operation.
+
+**5. The revenue cost of network safety follows the same pattern.** Well-sized batteries (±80kW/400kWh) lose only A\$0.40/day for network safety. The largest gap is ±100kW/400kWh at A\$20.85/day, where RL must significantly moderate the ±100kW dispatch to avoid overvoltage during midday charging.
 
 
 ## Project Structure
@@ -275,7 +377,10 @@ community-battery/
 ├── download_prices.py              ← Download AEMO price data
 ├── run_timeseries.py               ← Baseline vs DP-optimised comparison
 ├── run_feedback.py                 ← DP sensitivity analysis
-├── run_qlearning.py                ← Q-learning sensitivity analysis
+├── run_qlearning.py                ← Q-learning sensitivity (Model A: spot prices)
+├── run_qlearning_tou.py            ← Q-learning sensitivity (Model B: TOU prices)
+├── run_business_model_comparison.py← Model A vs Model B revenue and violations
+├── run_branch_comparison.py        ← Branch A vs Branch B voltage analysis
 │
 ├── dss/
 │   └── suburb_feeder_32.dss        ← OpenDSS circuit definition
@@ -284,7 +389,7 @@ community-battery/
 │   ├── dp/                         ← Layer 2: DP optimiser
 │   │   ├── battery.py                  Battery physical model
 │   │   ├── solver.py                   Bellman equation solver
-│   │   └── prices.py                   AEMO data loader
+│   │   └── prices.py                   AEMO data loader + TOU profile builder
 │   │
 │   ├── opendss/                    ← Layer 1: Network model
 │   │   ├── network.py                  OpenDSS interface
@@ -301,9 +406,15 @@ community-battery/
 │       ├── q_learning.py               Tabular Q-learning and two-phase training
 │       └── utils.py                    DP value init, dispatch extraction, I/O
 │
-└── data/
-    ├── aemo/                       ← Downloaded price data
-    └── q_tables/                   ← Saved Q-tables (.npz)
+├── data/
+│   ├── aemo/                       ← Downloaded price data
+│   └── q_tables/                   ← Saved Q-tables (.npz, spot and TOU)
+│
+└── docs/
+    ├── methods.md                  ← Full mathematical formulation
+    ├── dp_vs_rl_findings.md        ← Detailed dispatch comparison
+    ├── npv_analysis.md             ← NPV model and sensitivity
+    └── policy_implications.md      ← Policy recommendations
 ```
 
 ## Quick Start
@@ -311,10 +422,12 @@ community-battery/
 ```bash
 pip install opendssdirect.py numpy pandas requests
 
-python download_prices.py        # Download AEMO NSW1 price data
-python run_timeseries.py         # Baseline vs DP battery comparison
-python run_feedback.py           # DP sensitivity analysis
-python run_qlearning.py          # Q-learning sensitivity analysis
+python download_prices.py                  # Download AEMO NSW1 price data
+python run_timeseries.py                   # Baseline vs DP battery comparison
+python run_feedback.py                     # DP sensitivity analysis
+python run_qlearning.py                    # Q-learning: Model A (spot prices)
+python run_qlearning_tou.py                # Q-learning: Model B (TOU prices)
+python run_business_model_comparison.py    # Model A vs Model B comparison
 ```
 
 ## Dependencies

@@ -112,35 +112,51 @@ def train_two_phase(env_phase1, env_phase2,
                     n_phase1=30000, n_phase2=20000,
                     n_soc_bins=40, dp_result=None,
                     epsilon_start=0.3, epsilon_end=0.005,
-                    save_dir=None, label=None):
+                    epsilon_start_phase_2=0.1,
+                    save_dir=None, label=None,
+                    qtable_phase1=None):
+    """
+    Two-phase Q-learning training.
+    
+    If qtable_phase1 is provided (path to a .npz file), skip Phase 1
+    and load the provided Q-table directly into Phase 2.
+    """
 
-    if dp_result is not None:
-        Q_init = np.zeros((n_soc_bins, env_phase1.T, env_phase1.n_actions))
-        initialise_q_from_dp_value(Q_init, env_phase1, dp_result, n_soc_bins)
-        print(f"  Q-table initialised from DP value function")
+    if qtable_phase1 is not None:
+        # Skip Phase 1 — load provided Q-table
+        Q, meta = load_q_table(qtable_phase1)
+        print(f"  Phase 1 SKIPPED — loaded Q-table from {qtable_phase1}")
+        print(f"    shape: {Q.shape}, metadata: {meta}")
+        history1 = []
     else:
-        Q_init = None
+        # Initialise from DP if available
+        if dp_result is not None:
+            Q_init = np.zeros((n_soc_bins, env_phase1.T, env_phase1.n_actions))
+            initialise_q_from_dp_value(Q_init, env_phase1, dp_result, n_soc_bins)
+            print(f"  Q-table initialised from DP value function")
+        else:
+            Q_init = None
 
-    # Phase 1
-    print(f"  Phase 1: Refining arbitrage (penalty={env_phase1.penalty}, "
-          f"{n_phase1} episodes)")
-    Q, history1 = train(env_phase1, n_episodes=n_phase1,
-                        n_soc_bins=n_soc_bins, Q_init=Q_init,
-                        epsilon_start=epsilon_start, epsilon_end=0.05)
+        # Phase 1
+        print(f"  Phase 1: Refining arbitrage (penalty={env_phase1.penalty}, "
+              f"{n_phase1} episodes)")
+        Q, history1 = train(env_phase1, n_episodes=n_phase1,
+                            n_soc_bins=n_soc_bins, Q_init=Q_init,
+                            epsilon_start=epsilon_start, epsilon_end=0.05)
 
-    phase1_rev = np.mean([h['revenue'] for h in history1[-50:]])
-    phase1_viol = np.mean([h['violations'] for h in history1[-50:]])
-    print(f"  Phase 1 result: revenue=${phase1_rev:.2f}, violations={phase1_viol:.1f}")
+        phase1_rev = np.mean([h['revenue'] for h in history1[-50:]])
+        phase1_viol = np.mean([h['violations'] for h in history1[-50:]])
+        print(f"  Phase 1 result: revenue=${phase1_rev:.2f}, violations={phase1_viol:.1f}")
 
-    # Save Phase 1 Q-table
-    if save_dir and label:
-        save_q_table(Q, f"{save_dir}/Q_phase1_{label}.npz", {
-            'n_soc_bins': n_soc_bins,
-            'n_actions': env_phase1.n_actions,
-            'penalty': env_phase1.penalty,
-            'n_episodes': n_phase1,
-            'revenue': phase1_rev,
-        })
+        # Save Phase 1 Q-table
+        if save_dir and label:
+            save_q_table(Q, f"{save_dir}/Q_phase1_{label}.npz", {
+                'n_soc_bins': n_soc_bins,
+                'n_actions': env_phase1.n_actions,
+                'penalty': env_phase1.penalty,
+                'n_episodes': n_phase1,
+                'revenue': phase1_rev,
+            })
 
     # Phase 2
     print(f"\n  Phase 2: Learning violation avoidance (penalty={env_phase2.penalty}, "
@@ -148,7 +164,8 @@ def train_two_phase(env_phase1, env_phase2,
     Q, history2 = train(env_phase2, n_episodes=n_phase2,
                         n_soc_bins=n_soc_bins, Q_init=Q,
                         alpha=0.05,
-                        epsilon_start=0.1, epsilon_end=epsilon_end)
+                        epsilon_start=epsilon_start_phase_2, 
+                        epsilon_end=epsilon_end)
 
     phase2_rev = np.mean([h['revenue'] for h in history2[-50:]])
     phase2_viol = np.mean([h['violations'] for h in history2[-50:]])

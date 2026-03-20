@@ -29,7 +29,7 @@ The study feeder has 11 voltage violations without any battery — 3 in the morn
 - Phase 1 (penalty=0, skip_network=True): Learn profitable arbitrage strategy, initialised from DP value function. No OpenDSS calls — runs ~100× faster than Phase 2.
 - Phase 2 (penalty=5–10, skip_network=False): Refine dispatch to avoid voltage violations. Each time step calls OpenDSS for power flow and violation detection.
 
-## Results
+## Model A: Wholesale Spot Arbitrage
 
 ### Head-to-Head Comparison
 
@@ -181,59 +181,92 @@ The cost increases with dispatch limit: ±100kW configurations sacrifice more re
 | Actions | 33 (±80kW, ±100kW), 21 (±50kW) | same |
 | Q-table init | DP value function | Phase 1 output |
 
-## Branch A vs Branch B: Battery Spillover Analysis
+The training configuration is identical for both spot and TOU price signals. Only the price vector passed to the environment changes.
 
-The study feeder has two identical branches — Branch A (battery at Node A4) and Branch B (no battery, control group). This design tests whether a single community battery provides localised or feeder-wide voltage support.
+## Model B: Retail TOU Arbitrage
 
-### Results
+All results above use NEM wholesale spot prices (Model A). This section presents the same analysis under ActewAGL Home Daytime Economy retail TOU rates (Model B).
 
-| Config | Method | A4 Violations | B4 Violations | A4 V_min (pu) | B4 V_min (pu) | B4 Avg Lift |
-|--------|--------|:---:|:---:|:---:|:---:|:---:|
-| **Baseline** | **—** | **11** | **11** | **0.9285** | **0.9285** | **—** |
-| ±50kW / 200kWh | DP | 4 | 4 | 0.9264 | 0.9267 | +0.0055 pu |
-| ±50kW / 200kWh | RL | 0 | 0 | 0.9455 | 0.9413 | +0.0071 pu |
-| ±80kW / 200kWh | DP | 5 | 6 | 0.9264 | 0.9267 | +0.0069 pu |
-| ±80kW / 200kWh | RL | 0 | 0 | 0.9455 | 0.9413 | +0.0083 pu |
-| ±80kW / 400kWh | DP | 3 | 3 | 0.9308 | 0.9286 | +0.0122 pu |
-| ±80kW / 400kWh | RL | 0 | 0 | 0.9455 | 0.9413 | +0.0125 pu |
-| ±100kW / 400kWh | DP | 4 | 4 | 0.9264 | 0.9267 | +0.0120 pu |
-| ±100kW / 400kWh | RL | 0 | 0 | 0.9476 | 0.9406 | +0.0137 pu |
+### TOU Price Signal
 
-### Mechanism: Junction Voltage Rise
+The TOU tariff defines three fixed price tiers (GST exclusive, from 1 July 2025):
 
-When the battery discharges at Node A4, current flows backward through the Branch A cables toward the junction bus. This raises the junction voltage, which propagates to Branch B. The voltage improvement at B4 is approximately 47% of the improvement at A4, determined by the feeder impedance ratio:
-```
-Trunk cable:   150m  (impedance from transformer to junction)
-Branch cable:  200m  (impedance from junction to end-of-branch)
-Total:         350m
+| Period | Time (AEST) | Rate (c/kWh) | A\$/MWh |
+|--------|-------------|:---:|:---:|
+| Solar soak | 11am–3pm | 16.00 | 160 |
+| Shoulder | 9pm–7am, 9am–11am, 3pm–5pm | 29.00 | 290 |
+| Peak | 7am–9am, 5pm–9pm | 44.07 | 441 |
 
-Junction rise / A4 rise ≈ trunk impedance / total impedance ≈ 150/350 ≈ 43%
-B4 rise / A4 rise ≈ 47% (measured across all configurations)
-```
+Source: ActewAGL ACT Standard plan electricity prices, Schedule of charges from 1 July 2025. The tariff aligns with Evoenergy's proposed residential TOU network tariff (Code 017) under the Revised Tariff Structure Statement for the 2024–29 regulatory period.
 
-At the critical evening period t=35 (17:30):
+### TOU DP vs TOU Q-Learning: Head-to-Head
 
-| Config | A4 voltage lift | B4 voltage lift | Ratio |
+| Config | TOU DP Revenue | DP Violations | TOU RL Revenue | RL Violations | Revenue Gap |
+|--------|:---:|:---:|:---:|:---:|:---:|
+| **Baseline (no battery)** | **—** | **11** | **—** | **—** | **—** |
+| ±50kW / 200kWh | A\$79.48 | 4 | A\$75.34 | **0** | −A\$4.14 |
+| ±50kW / 300kWh | A\$97.76 | 2 | A\$96.84 | **0** | −A\$0.92 |
+| ±50kW / 400kWh | A\$109.27 | 2 | A\$108.47 | **0** | −A\$0.80 |
+| ±80kW / 200kWh | A\$83.51 | 5 | A\$80.57 | **0** | −A\$2.94 |
+| ±80kW / 300kWh | A\$119.81 | 3 | A\$117.54 | **0** | −A\$2.27 |
+| ±80kW / 400kWh | A\$145.22 | 2 | A\$144.82 | **0** | −A\$0.40 |
+| ±100kW / 200kWh | A\$85.23 | 7 | A\$81.56 | **0** | −A\$3.67 |
+| ±100kW / 300kWh | A\$122.74 | 10 | A\$119.14 | **0** | −A\$3.60 |
+| ±100kW / 400kWh | A\$158.43 | 9 | A\$137.58 | **0** | −A\$20.85 |
+
+Q-learning achieves **0 violations across all 9 configurations** under TOU prices, confirming that the two-phase training approach generalises across price signals. The TOU DP has violations in all 9 configurations — worse than spot DP (which achieves 0 violations in 2 of 9).
+
+### Revenue Cost of Network Safety (TOU)
+
+| Config | TOU DP | TOU RL | Gap (A\$/day) | Gap (%) |
+|--------|:---:|:---:|:---:|:---:|
+| ±50kW / 200kWh | 79.48 | 75.34 | 4.14 | 5.2% |
+| ±50kW / 400kWh | 109.27 | 108.47 | 0.80 | 0.7% |
+| ±80kW / 200kWh | 83.51 | 80.57 | 2.94 | 3.5% |
+| ±80kW / 400kWh | 145.22 | 144.82 | 0.40 | 0.3% |
+| ±100kW / 200kWh | 85.23 | 81.56 | 3.67 | 4.3% |
+| ±100kW / 400kWh | 158.43 | 137.58 | 20.85 | 13.2% |
+
+The same pattern as spot: larger batteries have smaller revenue gaps. At ±80kW/400kWh, network safety costs only A\$0.40/day — identical to the spot model. The largest gap is ±100kW/400kWh at A\$20.85/day, where RL must significantly moderate the ±100kW dispatch to avoid overvoltage.
+
+### Why TOU DP Has More Violations Than Spot DP
+
+Under spot prices, the DP sometimes discharges at 06:00 (A\$101/MWh) because the price is moderate. This incidentally provides morning voltage support. Under TOU prices, 06:00 is shoulder rate (A\$290/MWh) — more expensive than solar soak but cheaper than peak. The TOU DP charges at this time (to prepare for morning peak discharge at 07:00) rather than discharging, which worsens morning voltage violations.
+
+Additionally, the TOU DP concentrates all discharge into the peak windows (12 half-hour periods) rather than spreading it across high-price periods throughout the day. This creates deeper battery depletion at the end of the evening peak, leaving no energy for the final violation periods (t=39–41).
+
+### TOU RL Dispatch Strategies
+
+The TOU-trained RL discovers the same three strategy types as the spot-trained RL, adapted for the TOU dispatch pattern:
+
+**Morning pre-charging.** At ±80kW/200kWh, TOU RL charges at t=8–9 (+25, +70 kW) during shoulder rate (A\$290/MWh) and charges again at t=12–13 (+45, +40 kW) during the morning violation window. This is expensive — paying shoulder rate to store energy — but lifts morning voltage above 0.94 pu.
+
+**Evening oscillation.** At ±80kW/200kWh, TOU RL charges +80 kW at t=39 (A\$485/MWh peak!) to refill the battery mid-evening, then discharges through t=40–41. Paying peak rate to charge is extremely costly (A\$19.40 per half-hour) but necessary to maintain voltage support through the end of the evening period.
+
+**Conservative mid-evening discharge.** At ±80kW/300kWh, TOU RL charges +45 kW at t=35 (A\$485/MWh) then sustains -80 kW discharge through t=36–41. At ±100kW/400kWh, the RL varies discharge power between -56 and -100 kW across the evening instead of maintaining constant -100 kW.
+
+### Cross-Model Comparison: Annual Revenue (Violation-Free RL Only)
+
+| Config | Spot RL (A\$/yr) | TOU RL (A\$/yr) | TOU Advantage |
 |--------|:---:|:---:|:---:|
-| RL ±50kW / 200kWh | +0.0381 pu | +0.0170 pu | 45% |
-| RL ±80kW / 200kWh | +0.0618 pu | +0.0289 pu | 47% |
-| RL ±80kW / 400kWh | +0.0618 pu | +0.0289 pu | 47% |
-| RL ±100kW / 400kWh | +0.0770 pu | +0.0365 pu | 47% |
+| ±50kW / 200kWh | A\$9,662 | A\$27,499 | +A\$17,838 (2.8×) |
+| ±50kW / 300kWh | A\$11,934 | A\$35,348 | +A\$23,413 (3.0×) |
+| ±50kW / 400kWh | A\$13,103 | A\$39,592 | +A\$26,488 (3.0×) |
+| ±80kW / 200kWh | A\$12,542 | A\$29,408 | +A\$16,866 (2.3×) |
+| ±80kW / 300kWh | A\$15,513 | A\$42,904 | +A\$27,391 (2.8×) |
+| ±80kW / 400kWh | A\$17,860 | A\$52,861 | +A\$35,001 (3.0×) |
+| ±100kW / 200kWh | A\$13,254 | A\$29,769 | +A\$16,515 (2.2×) |
+| ±100kW / 300kWh | A\$16,254 | A\$43,486 | +A\$27,232 (2.7×) |
+| ±100kW / 400kWh | A\$17,706 | A\$50,217 | +A\$32,511 (2.8×) |
 
-### Key Findings
+The TOU business model produces **2–3× higher violation-free revenue** than wholesale spot arbitrage. Three factors drive the advantage: the TOU spread is wider (A\$281/MWh vs A\$245/MWh), the peak rate applies for more periods per day (12 vs ~5 for spot), and TOU revenue is guaranteed daily while spot revenue varies.
 
-**1. A single battery protects both branches.** Across all four RL configurations, the battery on Branch A eliminates all 11 violations on both A4 and B4. The DNSP does not need one battery per branch — one well-placed battery per feeder is sufficient.
+### Key Cross-Model Findings
 
-**2. DP leaves residual violations on both branches; RL eliminates all.** Under DP dispatch, B4 has 3–6 remaining violations because the battery empties before the evening peak ends. The RL's oscillating strategy maintains discharge through the full evening, keeping both branches above the 0.94 pu limit.
+**1. Business model choice matters more than battery sizing.** A 200 kWh battery under TOU (A\$29,408/yr at ±80kW) earns more than a 400 kWh battery under spot (A\$17,860/yr at ±80kW). The business model decision should precede the sizing decision.
 
-**3. Branch B margins are thin.** B4 minimum voltage under RL is 0.9406–0.9416 pu — only 0.1–0.2% above the 0.94 limit. A4 has a more comfortable margin at 0.9455–0.9476 pu. Branch B is the marginal constraint: if the feeder had longer branches, higher Branch B loads, or more than two branches, the spillover might be insufficient.
+**2. Q-learning generalises across price signals.** The same two-phase training architecture — DP warm-start, penalty-free Phase 1, OpenDSS-penalised Phase 2 — works for both volatile spot prices and fixed TOU rates. The RL discovers analogous voltage support strategies under both price regimes.
 
-**4. Higher dispatch power improves spillover.** The B4 average voltage lift increases with dispatch limit: +0.0071 pu at ±50kW to +0.0137 pu at ±100kW. This is because higher discharge power drives more current through the trunk cable, producing a larger junction voltage rise. However, the additional lift has diminishing returns — ±80kW provides most of the benefit.
+**3. TOU transforms the investment case.** Under spot prices, the 200 kWh battery at ±80kW requires augmentation deferral credits for positive NPV (simple payback 9.2 years). Under TOU, simple payback drops to approximately 3.9 years — viable as a standalone investment.
 
-### Implications for Battery Placement
-
-The 47% attenuation ratio is specific to this feeder's 150m trunk / 200m branch geometry. On feeders with different topologies:
-
-- **Short trunk, long branches** (e.g., 50m trunk, 300m branch): attenuation ratio drops to ~15%. A single battery may not protect the opposite branch. Multiple batteries or central placement at the junction would be needed.
-- **Long trunk, short branches** (e.g., 250m trunk, 100m branch): attenuation ratio rises to ~70%. A single battery provides strong feeder-wide support.
-- **Three or more branches**: the junction voltage rise is shared across all branches, but each branch's own cable drop remains. Central placement or coordinated multi-battery dispatch becomes the research question.
+**4. TOU DP requires RL more than spot DP does.** TOU DP has violations in all 9 configurations (vs 7 of 9 for spot DP). The fixed TOU schedule creates a rigid dispatch pattern that aligns poorly with the morning violation window. RL is essential for network-safe TOU operation.

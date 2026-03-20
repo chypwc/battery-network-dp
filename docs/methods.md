@@ -183,7 +183,7 @@ This initialisation fills the Q-table at every state, not just along the DP's tr
 | Actions | 21 (5kW steps) | 33 (5kW steps) | 33 (6kW steps) |
 | Phase 1 episodes | 50,000 | 30,000–50,000 | 50,000 |
 | Phase 2 episodes | 50,000 | 80,000 | 100,000 |
-| Phase 2 penalty $\lambda$ | 5.0 | 5.0 | 10.0 |
+| Phase 2 penalty $\lambda$ | 5.0 | 5.0 | 10.0 - 30.0 |
 | Phase 2 epsilon end | 0.001 | 0.001 | 0.001 |
 
 Higher dispatch limits require more actions (finer power resolution), more SoC bins (each action moves more kWh), more Phase 2 episodes (wider action space to explore), and higher penalty (more severe violations to overcome).

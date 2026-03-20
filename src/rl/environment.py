@@ -37,6 +37,22 @@ class CommunityBatteryEnv:
         self.soc = self.battery.kwh_rated / 2 # initial soc
         return (self.soc, self.t)
 
+
+    # def reset(self):
+    #     """Start a new episode with randomised initial SoC"""
+    #     network.load_circuit(self.dss_file)
+    #     network.enable_battery()
+    #     if self.battery.kwh_rated != 200:
+    #         network.set_battery_capacity(self.battery.kwh_rated)
+
+    #     self.t = 0
+    #     # Rnadomise initial SoC between 20% and 80% of capacity
+    #     low = self.battery.soc_min + 0.1 * self.battery.kwh_rated
+    #     high = self.battery.soc_max - 0.2 * self.battery.kwh_rated
+    #     self.soc = np.random.uniform(low, high)
+    #     return (self.soc, self.t)
+
+
     def step(self, action_idx):
         action_kw = self.action_values[action_idx]
         s_next = self.battery.next_soc(self.soc, action_kw, self.dt)
@@ -50,6 +66,7 @@ class CommunityBatteryEnv:
             else:
                 action_kw = 0.0
                 s_next = self.soc
+
         # Only call OpenDSS if needed
         if self.skip_network:
             n_violation = 0
