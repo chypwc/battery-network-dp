@@ -296,30 +296,6 @@ Each discharge period injects power into the feeder, lifting voltage above 0.94 
 
 These strategies require knowledge of the voltage response to battery actions — knowledge that only exists in the OpenDSS power flow model. The DP feedback loop cannot discover the oscillating strategy because it is revenue-suboptimal at every individual time step.
 
-### NPV Analysis
-
-A 20-year discounted cash flow model evaluates the investment case for the 200 kWh and 400 kWh batteries at ±80kW with RL dispatch. Cost data is sourced from CSIRO GenCost 2025, AER RORI 2025 (6.53% discount rate), and Evoenergy's 2024 Tariff Structure Statement. Costs (capital, O&M, module replacement) are identical across business models — only the revenue differs.
-
-**Model A (Spot) — ±80kW / 200kWh:**
-
-| Tier | NPV | Includes |
-|------|:---:|---------|
-| **Tier 1: Arbitrage only** | **-A\$29,969** | Operator revenue − costs (most realistic) |
-| Tier 2: + augmentation | -A\$8,874 | + deferred transformer, requires DNSP contract |
-| Tier 3: + aug + LRMC | +A\$3,767 | + export saving, theoretical maximum |
-
-**Model B (TOU) — ±80kW / 200kWh:**
-
-| Tier | NPV | Includes |
-|------|:---:|---------|
-| **Tier 1: Arbitrage only** | **+A\$135,533** | Operator revenue − costs (most realistic) |
-| Tier 2: + augmentation | +A\$156,627 | Bonus if DNSP contract exists |
-| Tier 3: + aug + LRMC | +A\$169,269 | Theoretical maximum |
-
-**Tier 1** assumes the operator receives only arbitrage revenue (NEM spot settlement or retail TOU bill savings) with no payments from the distribution network operator. **Tier 2** adds a DNSP network support payment for deferring a specific A\$45,000 transformer upgrade by 10 years — a concrete, project-level benefit that could be contracted under the NER's non-network alternatives framework. **Tier 3** further adds the system-wide export LRMC saving (A\$1,150/yr), which reflects Evoenergy's average incremental cost of managing solar exports across the network — a more abstract value that is unlikely to appear in a practical contract.
-
-For full model details, equations, and sensitivity analysis, see [docs/npv_analysis.md](docs/npv_analysis.md).
-
 ### Model B: Retail TOU Arbitrage
 
 #### DP vs Q-Learning: Head-to-Head (TOU)
@@ -368,6 +344,30 @@ The retail TOU business model produces **2–3× higher violation-free revenue**
 **4. TOU DP has violations in all 9 configurations.** Unlike spot DP (which achieves 0 violations at ±50kW/300kWh and ±50kW/400kWh), TOU DP causes violations in every configuration because its dispatch pattern is different: it idles during the morning (shoulder rate, no incentive to discharge) while baseline violations occur at 06:00–06:30. Q-learning is essential for network-safe TOU operation.
 
 **5. The revenue cost of network safety follows the same pattern.** Well-sized batteries (±80kW/400kWh) lose only A\$0.40/day for network safety. The largest gap is ±100kW/400kWh at A\$20.85/day, where RL must significantly moderate the ±100kW dispatch to avoid overvoltage during midday charging.
+
+### NPV Analysis
+
+A 20-year discounted cash flow model evaluates the investment case under both business models. The primary analysis uses ±100kW dispatch to match GenCost's 2hr (100kW/200kWh) and 4hr (100kW/400kWh) power rating specifications. Cost data is sourced from CSIRO GenCost 2025, AER RORI 2025 (6.53% discount rate), and Evoenergy's 2024 Tariff Structure Statement. Costs are identical across business models — only the revenue differs.
+
+**Model A (Spot) — ±100kW / 200kWh:**
+
+| Tier | NPV | Includes |
+|------|:---:|---------|
+| **Tier 1: Arbitrage only** | **-A\$23,268** | Operator revenue − costs (most realistic) |
+| Tier 2: + augmentation | -A\$2,173 | + deferred transformer, requires DNSP contract |
+| Tier 3: + aug + LRMC | +A\$10,468 | + export saving, theoretical maximum |
+
+**Model B (TOU) — ±100kW / 200kWh:**
+
+| Tier | NPV | Includes |
+|------|:---:|---------|
+| **Tier 1: Arbitrage only** | **+A\$139,083** | Operator revenue − costs (most realistic) |
+| Tier 2: + augmentation | +A\$160,177 | Bonus if DNSP contract exists |
+| Tier 3: + aug + LRMC | +A\$172,819 | Theoretical maximum |
+
+**Tier 1** assumes the operator receives only arbitrage revenue (NEM spot settlement or retail TOU bill savings) with no payments from the distribution network operator. **Tier 2** adds a DNSP network support payment for deferring a specific A\$45,000 transformer upgrade by 10 years — a concrete, project-level benefit that could be contracted under the NER's non-network alternatives framework. **Tier 3** further adds the system-wide export LRMC saving (A\$1,150/yr), which reflects Evoenergy's average incremental cost of managing solar exports across the network — a more abstract value that is unlikely to appear in a practical contract.
+
+For full model details, equations, and sensitivity analysis, see [docs/npv_analysis.md](docs/npv_analysis.md).
 
 
 ## Project Structure
