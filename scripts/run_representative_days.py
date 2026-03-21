@@ -163,6 +163,7 @@ def run_day(label, date, csv_path, bucket_days, pypsa_revenue):
         n_phase1=N_PHASE1, n_phase2=N_PHASE2,
         n_soc_bins=N_SOC_BINS,
         epsilon_start=EPSILON_START, epsilon_end=EPSILON_END,
+        epsilon_start_phase_2=0.1 ,
         save_dir='data/q_tables',
         label=f"repr_{label}_{DISPATCH_LIMIT}kW_{CAPACITY}kWh")
 

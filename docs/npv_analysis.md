@@ -85,18 +85,35 @@ However, both benefits may ultimately defer the same physical infrastructure. If
 
 The primary analysis uses ±100kW dispatch, matching the GenCost 2hr and 4hr power rating assumptions. The ±80kW results are reported as a sensitivity (conservative design with wider voltage margins).
 
+**Single-day RL revenue (used in original NPV sheets):**
+
 | Parameter | Model A (Spot) | Model B (TOU) | Source |
 |-----------|:---:|:---:|--------|
 | Daily RL revenue ±100kW / 200kWh | A\$36.31 | A\$81.56 | Q-learning (0 violations) |
 | Daily RL revenue ±100kW / 400kWh | A\$48.51 | A\$137.58 | Q-learning (0 violations) |
 | Daily RL revenue ±80kW / 200kWh (sensitivity) | A\$34.44 | A\$80.57 | Q-learning (0 violations) |
 | Daily RL revenue ±80kW / 400kWh (sensitivity) | A\$48.93 | A\$144.82 | Q-learning (0 violations) |
-| Export absorption power | 50 kW | 50 kW | Midday solar charge |
-| LRMC export rate | A\$23/kW/year | A\$23/kW/year | Evoenergy TSS 2024 |
-| O&M rate | 1.5% of capital/year | 1.5% of capital/year | Industry estimate |
-| Discount rate | 6.53% | 6.53% | AER RORI 2025 |
 
-Model A price signal: NEM NSW1 spot prices (typical day, spread A\$245/MWh).
+**Full-year spot revenue (used in new NPV sheets):**
+
+| Scenario | Annual | Basis |
+|----------|------:|-------|
+| Spot — top line (RL, incl spikes) | A\$37,422 | 366-day DP × RL/DP ratios from 5 representative days |
+| Spot — bottom line (excl top 20 spikes) | A\$13,303 | PyPSA 366 days, removing top 20 spike days |
+| Spot — single typical day × 365 (original) | A\$13,249 | June 28, 2024 (median spread day) |
+
+The full-year analysis reveals that the original single-day estimate (A\$13,249/year) closely matches the conservative bottom line (A\$13,303/year) — confirming it was a reasonable representation of stable, repeatable revenue. The top line (A\$37,422/year) is 2.8× higher because 10 spike days contribute 44% of annual spot revenue.
+
+TOU revenue does not require a full-year analysis because the retail tariff is fixed: A\$81.56/day every day, A\$29,790/year with zero variance.
+
+| Other parameters | Value | Source |
+|-----------|-------|--------|
+| Export absorption power | 50 kW | Midday solar charge |
+| LRMC export rate | A\$23/kW/year | Evoenergy TSS 2024 |
+| O&M rate | 1.5% of capital/year | Industry estimate |
+| Discount rate | 6.53% | AER RORI 2025 |
+
+Model A price signal: NEM NSW1 spot prices (calendar year 2024, 366 days).
 Model B price signal: ActewAGL Home Daytime Economy tariff (GST excl., from 1 July 2025). Solar soak 16.00 c/kWh, shoulder 29.00 c/kWh, peak 44.07 c/kWh. Spread A\$281/MWh.
 
 Avoided augmentation (DNSP benefit only):
@@ -203,31 +220,50 @@ The primary analysis uses ±100kW to match GenCost's 2hr/4hr power rating specif
 
 The ±80kW / 400kWh TOU configuration actually earns higher daily revenue (A\$144.82 vs A\$137.58) than ±100kW / 400kWh TOU. This is because at ±100kW, the RL must moderate its discharge more aggressively to avoid overvoltage during midday charging and undervoltage during evening peak — the revenue cost of network safety is 13.2% at ±100kW versus only 0.3% at ±80kW. The ±80kW dispatch is a better match for the 400 kWh battery on this feeder.
 
-### Revenue Assumption: Single-Day vs Full-Year
+### Full-Year Revenue Analysis: Top Line vs Bottom Line
 
-The daily spot revenue (A\$36.31) is based on one typical price day with a spread of A\$244/MWh (from -A\$14 midday to A\$230 morning peak). This is the largest source of uncertainty in the spot model.
+The full-year PyPSA + DP analysis (366 days of 2024 AEMO NSW1 prices) reveals that spot revenue is dominated by rare spike events:
 
-A full year of NEM prices includes low-spread days (A\$10–15/day revenue), typical days (A\$25–35/day), and occasional spike days (A\$100–500/day). The annual average is likely lower than our typical day:
+| Statistic | PyPSA | DP |
+|-----------|------:|------:|
+| Annual total | A\$36,190 | A\$38,661 |
+| Mean daily | A\$98.88 | A\$105.63 |
+| Median daily | A\$31.17 | A\$37.83 |
+| Spike days (> A\$500/day) | 10 | 10 |
+| Spike contribution | 44% of annual | 41% of annual |
 
-| Revenue scenario | Daily average | Annual | NPV impact (200 kWh, spot) |
-|-----------------|:---:|:---:|:---:|
-| Conservative (full-year avg) | A\$25/day | A\$8,942 | ~-A\$43,000 |
-| Base (our typical day) | A\$36.31/day | A\$12,988 | -A\$23,268 |
-| Optimistic (incl. spike days) | A\$45/day | A\$16,117 | ~-A\$10,000 |
+The top 10 spike days (2.7% of the year) contribute nearly half the annual revenue. Removing them, spot annual drops to A\$16,573 (PyPSA). This extreme concentration of revenue in rare events creates two valid NPV scenarios:
 
-The spot model NPV is negative across all reasonable revenue scenarios. The TOU model (A\$81.56/day, fixed) is not subject to this uncertainty — the revenue is determined by the published retail tariff schedule.
+**Top line (A\$37,422/year):** Uses the full-year RL-estimated revenue, assuming 2024's spike pattern recurs annually. This is the best-case spot scenario. The RL estimate applies RL/DP ratios from 5 representative days (one per revenue bucket) to the 366-day DP results, accounting for the 3.2% network safety cost.
 
-### Why the TOU Spread Is Wider Than the Spot Spread
+**Bottom line (A\$13,303/year):** Excludes the top 20 spike days, representing only stable, repeatable revenue. This is the worst-case spot scenario. It closely matches the original single-day estimate (A\$13,249/year), confirming that our typical day was representative of non-spike conditions.
 
-The TOU spread (A\$281/MWh) is wider than the median spot day spread (A\$245/MWh) for structural reasons, not just because of the particular day we selected:
+### NPV: Four Scenarios (±100kW / 200kWh)
 
-**The retail peak rate embeds a markup.** ActewAGL's peak rate (44.07 c/kWh = A\$441/MWh) bundles wholesale energy cost, Evoenergy network charges, retail margin, hedging costs, and green scheme levies. The wholesale spot price during peak hours might be A\$200–300/MWh, but the retail rate is A\$441/MWh. This markup inflates the top of the TOU spread.
+| Scenario | Annual Revenue | NPV (Tier 1) | Simple Payback |
+|----------|------:|------:|------:|
+| **Spot — top line (incl spikes)** | A\$37,422 | **+A\$214,013** | 3.3 yr |
+| **TOU — guaranteed** | A\$29,790 | **+A\$139,083** | 3.9 yr |
+| Spot — bottom line (excl spikes) | A\$13,303 | -A\$22,779 | 10.0 yr |
+| Spot — single day × 365 (original) | A\$13,249 | -A\$23,268 | 8.9 yr |
 
-**The retail solar soak rate has a floor.** ActewAGL's solar soak rate (16.00 c/kWh = A\$160/MWh) is the minimum the retailer charges — it never goes negative. Wholesale spot prices can drop to -A\$100/MWh or below during midday solar surplus. Negative spot prices help the spot model (the battery gets paid to charge), but the TOU floor at A\$160/MWh means TOU charging is always a cost, never a revenue source.
+The spot model NPV ranges from -A\$23K (bottom line) to +A\$214K (top line) depending on spike day assumptions. The investment decision hinges entirely on whether the operator expects spike days to recur. TOU sits at +A\$139K with certainty.
 
-**The median spot day underrepresents the annual average.** NEM spot price distributions are heavily right-skewed — a few spike days (A\$1,000–15,000/MWh) pull the annual mean well above the median. By choosing the median spread, we pick a "typical" day that excludes these spikes. A battery earning A\$36/day on typical days might earn A\$500–2,000 on a spike day, and 10–20 spike days per year would significantly boost the annual average.
+**Key insight:** The original single-day NPV (-A\$23,268) was not wrong — it accurately represents the bottom line. The full-year analysis doesn't overturn it; rather, it reveals the upside from spike days that the typical day misses.
 
-**The 2–3× TOU advantage is likely overstated.** Our comparison pits the spot *median day* against the TOU *every day*. A full-year spot simulation capturing spike days would narrow the gap. The TOU model would still earn more (the structural retail markup ensures that), but the ratio might be 1.5–2× rather than 2–3×. The key advantage of TOU is not just higher revenue but lower variance — the operator knows exactly what the battery will earn every day, which reduces investment risk and improves bankability.
+### Violation Context
+
+All revenue figures above use network-safe (RL) dispatch with zero violations. For reference, unconstrained dispatch (PyPSA and DP) causes 3,000+ violations per year — every single day has violations. The network safety cost is A\$1,239/year (3.2% of DP revenue), which is already deducted from the RL revenue estimate.
+
+### Why the TOU Spread Is Wider Than the Typical Spot Spread
+
+The TOU spread (A\$281/MWh) is wider than the median spot day spread (A\$213/MWh) for structural reasons:
+
+**The retail peak rate embeds a markup.** ActewAGL's peak rate (44.07 c/kWh = A\$441/MWh) bundles wholesale energy cost, Evoenergy network charges, retail margin, hedging costs, and green scheme levies. The wholesale spot peak on a normal day is typically A\$100–300/MWh.
+
+**The TOU charging cost has a floor.** Under TOU, the cheapest charging window is A\$160/MWh (solar soak). Under spot pricing, midday prices can drop below zero — the battery gets **paid** to charge. This benefits spot on days with negative prices (20–30% of days), but the TOU spread is available every day.
+
+**The TOU advantage narrows but persists in the full year.** Using the full-year data, the TOU annual revenue (A\$29,790) is 80% of the spot top line (A\$37,422). The original single-day comparison suggested a 2.2× TOU advantage — the full-year data narrows this to 0.8× when spikes are included, but TOU still dominates on a risk-adjusted basis because 44% of spot revenue depends on 10 unpredictable days.
 
 ### Export LRMC Saving: DNSP Benefit Only
 
@@ -267,7 +303,8 @@ The year-12 replacement at projected 2037 costs (A\$195/kWh for 2hr) may be cons
 
 | Component | Direction of bias | NPV impact (spot) |
 |-----------|------------------|:---:|
-| Daily revenue (single day) | Overstated for spot | -A\$20,000 to -A\$35,000 |
+| Spot revenue — single day | Underestimates (misses spikes) | Original NPV too pessimistic by ~A\$237K |
+| Spot revenue — with spikes | Overstates stable component | Top line may not recur annually |
 | TOU revenue (fixed tariff) | Accurate | Neutral |
 | Export LRMC | Excluded from operator NPV | Neutral (DNSP benefit) |
 | Avoided augmentation | Excluded from operator NPV | Neutral (DNSP benefit) |
@@ -275,20 +312,24 @@ The year-12 replacement at projected 2037 costs (A\$195/kWh for 2hr) may be cons
 | O&M rate | Uncertain | -A\$5,000 to +A\$5,000 |
 | Capital cost | About right | Neutral |
 
-For the spot model, the revenue assumption is the dominant risk. For the TOU model, the risk is primarily in whether the tariff structure is maintained by ActewAGL and Evoenergy over the 20-year project life.
+For the spot model, the revenue distribution (spike dependence) is the dominant risk. For the TOU model, the risk is primarily in whether the tariff structure is maintained by ActewAGL and Evoenergy over the 20-year project life.
 
 ## Conclusions
 
-**1. The business model is the dominant investment variable.** The TOU retail arbitrage model (Model B) transforms the 200 kWh battery from marginally viable (spot NPV -A\$17,328) to strongly profitable (TOU NPV +A\$148,174). This effect exceeds the impact of doubling battery capacity, changing the dispatch algorithm, or adding DNSP augmentation credits.
+**1. The spot model NPV ranges from -A\$23K to +A\$214K.** The investment outcome depends entirely on spike day frequency. The top line (A\$37,422/year, including spikes) gives a strongly positive NPV with 3.3-year payback. The bottom line (A\$13,303/year, excluding spikes) gives a negative NPV with 10-year payback. An investor must decide which scenario to underwrite.
 
-**2. Spot arbitrage alone does not justify the investment.** Under Model A, neither the 200 kWh nor the 400 kWh battery achieves positive NPV from arbitrage revenue. The 200 kWh battery requires a DNSP network support payment (augmentation deferral credit) for marginal viability (+A\$3,767), but a market participant would not automatically receive this payment.
+**2. TOU provides a certain +A\$139K NPV.** The TOU model is positive regardless of market conditions because revenue is fixed by the published retail tariff. Simple payback is 3.9 years. This certainty makes TOU the bankable choice — a lender can underwrite the project with confidence.
 
-**3. TOU arbitrage is viable without DNSP support.** Under Model B, both batteries are strongly viable from retail bill savings alone. Simple payback is 4.1 years (200 kWh) and 3.2 years (400 kWh). Augmentation deferral credits are a bonus, not a requirement.
+**3. The original single-day NPV was the bottom line, not wrong.** Our original estimate (A\$13,249/year → NPV -A\$23,268) matches the conservative full-year figure (A\$13,303/year → NPV -A\$22,779). The full-year analysis reveals the spike upside that the typical day misses, but the conservative case remains valid.
 
-**4. Avoided augmentation is a DNSP benefit, not an operator benefit.** The A\$23,905 augmentation deferral PV accrues to Evoenergy (avoided transformer upgrade), not to the battery operator. Models A and B should be evaluated on arbitrage revenue only. The augmentation value could flow to the operator through a DNSP network support contract, but this requires a regulatory framework that does not yet exist for community batteries in the ACT.
+**4. TOU dominates spot on a risk-adjusted basis.** Even at the spot top line (A\$37,422/year), the spot model's revenue depends on 10 unpredictable spike days. If 2025 has 3 spike days instead of 10, spot annual revenue drops to ~A\$22,000 — below TOU's guaranteed A\$29,790. TOU earns less than spot's best case but more than spot's likely case.
 
-**5. The 200 kWh battery has a better business case than 400 kWh under spot, but 400 kWh dominates under TOU.** Under spot, the 200 kWh battery's lower capital and replacement costs outweigh its lower revenue. Under TOU, the 400 kWh battery's additional revenue (A\$144.82 vs A\$80.57 per day) more than justifies the extra cost, achieving NPV of +A\$311,316 versus +A\$148,174.
+**5. The business model is the dominant investment variable.** TOU transforms the 200 kWh battery from marginal (spot bottom line NPV -A\$23K) to strongly profitable (TOU NPV +A\$139K). This effect exceeds the impact of doubling battery capacity, changing the dispatch algorithm, or adding DNSP augmentation credits.
 
-**6. Additional revenue streams remain important for spot-only operators.** FCAS participation (est. A\$3,000–5,000/year) or DNSP network support payments (est. A\$5,000–10,000/year) would push the spot NPV positive. These are essential for Model A viability but optional for Model B.
+**6. Network safety cost is negligible in the NPV.** The RL network-safe dispatch sacrifices A\$1,239/year (3.2% of DP revenue) to eliminate all 3,021 annual violations. Over 20 years discounted, this is ~A\$13,000 — a small fraction of the capital cost and well within the uncertainty range of other assumptions.
 
-**7. Falling battery costs will improve both models.** GenCost projects 2hr battery costs declining from A\$580/kWh (2025) to A\$306/kWh (2035) under current policies. The spot model reaches viability at approximately A\$400/kWh (2028–2030). The TOU model is already viable at current costs.
+**7. Additional revenue streams remain important for spot-only operators.** FCAS participation (est. A\$3,000–5,000/year) or DNSP network support payments (est. A\$5,000–10,000/year) would push the spot bottom line NPV positive. These are essential for Model A viability without spike revenue but optional for Model B.
+
+**8. Falling battery costs will improve both models.** GenCost projects 2hr battery costs declining from A\$580/kWh (2025) to A\$306/kWh (2035) under current policies. At A\$306/kWh, the spot bottom line NPV turns positive. The TOU model is already strongly viable at current costs.
+
+For the full-year revenue distribution, violation analysis, and representative day methodology, see [docs/full_year_dispatch_analysis.md](docs/full_year_dispatch_analysis.md).

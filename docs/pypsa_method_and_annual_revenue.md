@@ -6,6 +6,7 @@ This analysis replaces the single typical day revenue estimate with a full-year 
 
 The PyPSA model solves the same arbitrage problem as our DP solver — maximise revenue subject to SoC constraints — but formulates it as a linear program (LP) solved by HiGHS. Both find the global optimum for unconstrained (no voltage constraints) revenue maximisation. The key advantage of PyPSA is speed: each daily LP solves in ~10ms, enabling the full-year sweep in under 60 seconds.
 
+**Important limitation:** PyPSA revenue represents an **upper bound** on what the battery can actually earn. The PyPSA model has no knowledge of the distribution feeder — it ignores the voltage constraints that the OpenDSS + RL layer enforces. Our RL results show that network-safe dispatch reduces revenue by 0–14% depending on the battery configuration, because the RL agent must sometimes curtail dispatch to avoid voltage violations. The PyPSA annual figures should therefore be interpreted as the theoretical maximum before network constraints are applied. To estimate network-safe annual revenue, we run DP and RL on 5 representative days selected from the PyPSA distribution and weight the results by frequency (see Representative Day Analysis).
 
 ### Battery Configuration
 
@@ -147,29 +148,43 @@ Spot total revenue (A\$36,190) exceeds TOU (A\$29,790) in 2024, but this compari
 
 ### Why the TOU Spread Is Wider Than the Typical Spot Spread
 
-The TOU price spread (A\$281/MWh between solar soak and peak) is structurally wider than the median spot spread because:
+The TOU price spread (A\$281/MWh between solar soak and peak) is structurally wider than the **median** spot spread because:
 
-**The retail peak rate embeds a markup.** ActewAGL's peak rate (44.07 c/kWh = A\$441/MWh) bundles wholesale energy, network charges, retail margin, and hedging costs. The wholesale spot peak is typically A\$100–300/MWh.
+**The retail peak rate embeds a markup.** ActewAGL's peak rate (44.07 c/kWh = A\$441/MWh) bundles wholesale energy, network charges, retail margin, and hedging costs. The wholesale spot peak is typically A\$100–300/MWh on a normal day. This inflates the top of the TOU spread well above the typical spot peak.
 
-**The retail solar soak rate has a floor.** The solar soak rate (16.00 c/kWh = A\$160/MWh) never goes negative, while wholesale spot prices can drop to -A\$100/MWh during solar surplus.
+**The TOU charging cost has a floor at A\$160/MWh.** Under TOU, the cheapest charging window is the solar soak period at 16.00 c/kWh (A\$160/MWh). Under spot pricing, midday prices can drop below zero (e.g., -A\$14/MWh on our typical day) — meaning the battery gets **paid** to charge. This negative charging cost benefits the spot model, making its per-cycle margin wider on days with negative prices. However, negative spot prices only occur on 20–30% of days, while the TOU spread is available every day.
 
-**The TOU spread applies every day.** The A\$281/MWh spread is guaranteed by the published tariff for every day of the year. The spot spread varies from A\$50 (quiet days) to A\$17,500 (extreme spikes).
+**The TOU spread applies every day.** The A\$281/MWh spread is guaranteed by the published tariff for all 365 days. The spot spread varies from A\$50 (quiet summer weekends) to A\$17,500 (extreme spike events). On the **median** day, the spot spread (A\$213/MWh) is narrower than TOU (A\$281/MWh). On spike days, spot far exceeds TOU — but these are rare (10 days per year).
 
 ## Implications for NPV
 
 ### Revised Revenue Estimates
 
-| Scenario | Daily | Annual | Use case |
-|----------|------:|------:|----------|
-| **Spot conservative** | A\$38.45 | A\$14,052 | Base case for spot NPV — excludes unreliable spikes |
-| Spot median | A\$31.17 | A\$11,377 | Pessimistic spot scenario |
-| Spot full year | A\$98.88 | A\$36,190 | Optimistic — assumes 2024 spikes recur annually |
-| **TOU guaranteed** | A\$81.56 | A\$29,790 | Base case for TOU NPV — no variance |
+The full-year PyPSA analysis provides three spot revenue scenarios, each answering a different question:
 
-The conservative spot estimate (A\$14,052/year) is close to our original single-day extrapolation (A\$13,249/year). The NPV conclusions from the existing analysis remain valid:
+**Scenario 1: "What does the battery earn in a year with no unusual events?"**
 
-- **Spot model (Tier 1):** NPV remains negative. Even with the full-year mean (A\$36,190/year), the spot model's NPV would improve but the revenue is unreliable.
-- **TOU model (Tier 1):** NPV remains strongly positive (A\$139,083). The full-year analysis confirms that TOU revenue is higher than spot's reliable component and has zero variance.
+Excluding the top 20 spike days removes revenue that depends on rare, unpredictable events (generator outages, extreme heat). The remaining 346 days represent the stable, repeatable revenue base. This is the most appropriate input for a conservative NPV.
+
+**Scenario 2: "What does a normal day look like?"**
+
+The median daily revenue — half the year's days earn more, half earn less. This is lower than Scenario 1 because Scenario 1's mean is pulled up by the A\$50–500 "high" days that are above the median but below the spike threshold.
+
+**Scenario 3: "What actually happened in 2024?"**
+
+The full historical total including all spike events. This is the highest figure but also the least reliable for forecasting — whether 2025 will have 10 spike days or 3 depends on weather, generator retirements, and market conditions that can't be predicted.
+
+| Scenario | How computed | Daily | Annual |
+|----------|-------------|------:|------:|
+| Stable base (excl top 20 spikes) | Mean of 346 non-spike days | A\$38.45 | A\$14,052 |
+| Median day | 50th percentile of all 366 days | A\$31.17 | A\$11,377 |
+| Full 2024 historical | Mean of all 366 days | A\$98.88 | A\$36,190 |
+| **TOU guaranteed** | Fixed daily from ActewAGL tariff | A\$81.56 | A\$29,790 |
+
+**Validation of original estimate.** Our original NPV used a single typical day (June 28, A\$36.30/day → A\$13,249/year). The stable base scenario (A\$14,052/year) and the median scenario (A\$11,377/year) bracket this estimate, confirming it was a reasonable representation of reliable spot revenue. The NPV conclusions from the existing analysis remain valid:
+
+- **Spot model (Tier 1):** NPV remains negative under all three spot scenarios. Even the full 2024 historical revenue (A\$36,190/year) improves the spot NPV substantially, but this depends on spike days recurring annually — an unreliable assumption.
+- **TOU model (Tier 1):** NPV remains strongly positive (A\$139,083). The TOU daily revenue (A\$81.56) exceeds the spot median (A\$31.17) by 2.6× and exceeds the stable base (A\$38.45) by 2.1×. TOU outperforms spot on every metric except the spike-dependent full-year total.
 
 ### Revenue at Risk
 
@@ -197,11 +212,13 @@ The PyPSA network consists of one bus, one grid generator (unlimited power at sp
 [Grid Generator] ←→ [Bus] ←→ [Battery StorageUnit]
   p_nom = ∞              ↑        p_nom = 0.1 MW
   marginal_cost = pₜ     |        max_hours = 2.0 h
-                     [Load]       η_store = η_dispatch = 0.95
-                   0.2 MW fixed   c_deg = A$20/MWh
+  (spot price at         [Load]   η_store = η_dispatch = 0.95
+   period t, A$/MWh)   0.2 MW    c_deg = A$20/MWh
 ```
 
-The load (0.2 MW) is a modelling device: it ensures the grid generator always produces positive power, so the battery can displace grid output by discharging. Without it, the generator output can't go below zero and the battery has no incentive to discharge.
+`marginal_cost = pₜ` means the grid generator's cost per MWh varies with each half-hourly period — it is the AEMO spot price at period $t$. For example, if `pₜ = A$230/MWh` at 07:00, then every MWh the grid supplies during that period costs A\$230. The optimiser minimises total grid cost, so it prefers the battery to discharge (displacing expensive grid power) when $p_t$ is high and charge (buying cheap grid power) when $p_t$ is low.
+
+The load (0.2 MW constant) is a modelling device: it ensures the grid generator always produces positive power, so the battery can displace grid output by discharging. Without it, the generator output can't go below zero and the battery would have no incentive to discharge. The load's cost (load × price × dt) is constant across all feasible solutions, so it does not affect the optimiser's dispatch decisions.
 
 #### Decision Variables
 
@@ -340,11 +357,11 @@ The PyPSA LP and our DP solve the same optimisation problem but differ in method
 
 ```bash
 # Download AEMO prices (if not already present)
-python download_prices.py
+python -m scripts.download_prices
 
 # Run full-year optimisation (~60 seconds)
-python run_pypsa_annual.py
+python -m scripts.run_pypsa_annual
 
 # Or analyse cached results
-python run_pypsa_annual.py --cached
+python -m scripts.run_pypsa_annual --cached
 ```
