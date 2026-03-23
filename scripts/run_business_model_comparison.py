@@ -6,8 +6,6 @@ Model B: Behind-the-meter retail arbitrage — battery arbitrages ActewAGL TOU r
 
 Includes OpenDSS voltage violation check for both dispatch strategies.
 
-Usage:
-    python run_business_model_comparison.py
 """
 
 import os

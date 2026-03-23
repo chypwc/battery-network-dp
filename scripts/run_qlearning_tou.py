@@ -5,8 +5,6 @@ Identical structure to run_qlearning.py but uses ActewAGL Home Daytime
 Economy TOU rates instead of NEM spot prices. Warm-starts from TOU DP
 value function. Saves Q-tables to data/q_tables/ with 'tou_' prefix.
 
-Usage:
-    python run_qlearning_tou.py
 """
 
 import numpy as np

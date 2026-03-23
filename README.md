@@ -256,12 +256,7 @@ Network safety cost: A\$1,239/year (3.2% of DP revenue).
 The top 10 spike days (2.7% of the year) contribute 44% of annual revenue. Without them, spot falls well below TOU.
 
 ![Revenue Distribution](docs/figures/revenue_histogram.png)
-*Daily spot revenue (PyPSA unconstrained LP) across 366 days of 2024. 
-Network-safe (RL) revenue is approximately 3% lower but follows the 
-same distribution. Most days earn A$10–50, but rare spike days 
-(clipped at A$200 in this view) dominate the annual total. The median 
-(A$31) is far below the mean (A$99) due to extreme right skew. TOU 
-daily revenue (A$82) exceeds the spot median every day.*
+*Daily spot revenue (PyPSA unconstrained LP) across 366 days of 2024. Network-safe (RL) revenue is approximately 3% lower but follows the same distribution. Most days earn A\$10–50, but rare spike days (clipped at A\$200 in this view) dominate the annual total. The median (A\$31) is far below the mean (A\$99) due to extreme right skew. TOU daily revenue (A\$82) exceeds the spot median every day.*
 
 #### Representative Day Validation
 
@@ -349,16 +344,22 @@ Each extension builds on the existing codebase and would constitute a research c
 
 ```
 community-battery/
-├── download_prices.py              ← Download AEMO price data
-├── run_timeseries.py               ← Baseline vs DP-optimised comparison
-├── run_feedback.py                 ← DP feedback loop sensitivity analysis
-├── run_qlearning.py                ← Q-learning sensitivity (Model A: spot)
-├── run_qlearning_tou.py            ← Q-learning sensitivity (Model B: TOU)
-├── run_business_model_comparison.py← Model A vs Model B comparison
-├── run_branch_comparison.py        ← Branch A vs Branch B voltage analysis
-├── run_pypsa_annual.py             ← PyPSA full-year optimisation (366 days)
-├── run_annual_dispatch.py          ← PyPSA + DP + OpenDSS violations (366 days)
-├── run_representative_days.py      ← DP + RL on 5 representative price days
+├── requirements.txt
+│
+├── scripts/                        ← All runnable entry points
+│   ├── download_prices.py              Download AEMO price data
+│   ├── run_timeseries.py               Baseline vs DP-optimised comparison
+│   ├── run_feedback.py                 DP feedback loop sensitivity analysis
+│   ├── run_qlearning.py                Q-learning sensitivity (Model A: spot)
+│   ├── run_qlearning_tou.py            Q-learning sensitivity (Model B: TOU)
+│   ├── run_business_model_comparison.py  Model A vs Model B comparison
+│   ├── run_branch_comparison.py        Branch A vs Branch B voltage analysis
+│   ├── run_pypsa_annual.py             PyPSA full-year optimisation (366 days)
+│   ├── run_annual_dispatch.py          PyPSA + DP + OpenDSS violations (366 days)
+│   ├── run_representative_days.py      DP + RL on 5 representative price days
+│   ├── run_check_dispatch.py           Verify dispatch against OpenDSS
+│   ├── pick_representative_days.py     Select representative days from annual data
+│   └── generate_figures.py             Generate README figures (histogram, dispatch, heatmap)
 │
 ├── dss/
 │   └── suburb_feeder_32.dss        ← OpenDSS circuit definition
@@ -399,6 +400,10 @@ community-battery/
 │   └── q_tables/                   ← Trained Q-tables (.npz)
 │
 ├── docs/
+│   ├── figures/                    ← Generated figures for README
+│   │   ├── revenue_histogram.png
+│   │   ├── dispatch_comparison.png
+│   │   └── violations_heatmap.png
 │   ├── methods.md                  ← Full mathematical formulation
 │   ├── business_models.md          ← Model A (spot) vs Model B (TOU) comparison
 │   ├── dp_vs_rl_findings.md        ← Dispatch comparison analysis
@@ -414,7 +419,7 @@ community-battery/
 ## Quick Start
 
 ```bash
-# Install dependencies by uv virtual environment
+# Install dependencies (uv virtual environment)
 uv pip install -r requirements.txt
 
 # Download AEMO NSW1 price data (Jan–Dec 2024)
@@ -431,8 +436,12 @@ python -m scripts.run_annual_dispatch          # PyPSA + DP + violations (~36 mi
 python -m scripts.run_representative_days      # DP + RL on 5 representative days (~50 min)
 
 # Analyse cached results
-python -m scripts.run_pypsa_annual.py --cached
-python -m scripts.run_annual_dispatch.py --cached
+python -m scripts.run_pypsa_annual --cached
+python -m scripts.run_annual_dispatch --cached
+
+# Generate figures for README
+python -m scripts.generate_figures             # Revenue histogram + dispatch comparison
+python -m scripts.generate_figures --with-heatmap  # + violations heatmap (~36 min)
 ```
 
 ## Dependencies

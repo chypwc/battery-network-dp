@@ -19,8 +19,6 @@ Representative days (from PyPSA annual analysis):
 
 Battery: ±100kW / 200kWh (GenCost 2hr spec, matches PyPSA analysis)
 
-Usage:
-    python run_representative_days.py
 """
 
 import numpy as np

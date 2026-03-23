@@ -6,9 +6,6 @@ Creates three graphs:
   2. Three-method dispatch comparison (PyPSA vs DP vs RL on typical day)
   3. Violations heatmap (366 days × 48 periods) — structural violation pattern
 
-Usage:
-    python generate_figures.py
-
 Requires:
     - data/pypsa/annual_revenue.csv (from run_pypsa_annual.py)
     - data/pypsa/annual_dispatch_results.csv (from run_annual_dispatch.py)

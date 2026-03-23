@@ -6,8 +6,6 @@ through OpenDSS, and compares against baseline (no battery) and DP.
 
 Outputs are printed to stdout AND saved to docs/dispatch_results.md.
 
-Usage:
-    python run_check_dispatch.py
 """
 
 import os
