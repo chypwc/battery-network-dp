@@ -1,0 +1,115 @@
+=== POMDP Momentum Comparison ===
+  Training: data/aemo/nem_prices_NSW1_2018_2023_clean.csv
+  Testing:  data/aemo/nem_prices_NSW1_clean.csv
+  N_REGIMES: 3
+  N_ACTIONS: 47
+
+--- Building training data ---
+  Training days: 2191
+  Standard trans: (3, 47, 24, 24)
+  Momentum trans: (3, 47, 24, 3, 24)
+  Belief grid: 12 points
+
+--- Classifying test days ---
+  Test days: 366
+
+============================================================
+=== Configuration 1: Standard (no momentum) ===
+============================================================
+Solving t = 40...
+Solving t = 30...
+Solving t = 20...
+Solving t = 10...
+Solving t = 0...
+  Solve time: 17.8s
+  [Standard] Day 50/366  (4.1s)
+  [Standard] Day 100/366  (7.2s)
+  [Standard] Day 150/366  (11.3s)
+  [Standard] Day 200/366  (15.3s)
+  [Standard] Day 250/366  (19.4s)
+  [Standard] Day 300/366  (23.6s)
+  [Standard] Day 350/366  (27.6s)
+  [Standard] Completed 366 days in 28.9s
+
+  [Standard]
+    Annual Det DP:    $    38,681
+    Annual POMDP:     $    21,263
+    Annual info value:$    17,418
+    Capture rate:           55.0%
+    Negative days:            19
+    Median converge:          6p (3.0h)
+    Never converge:           68
+
+============================================================
+=== Configuration 2: Momentum ===
+============================================================
+Solving t = 40...
+Solving t = 30...
+Solving t = 20...
+Solving t = 10...
+Solving t = 0...
+  Solve time: 53.4s
+  [Momentum] Day 50/366  (4.2s)
+  [Momentum] Day 100/366  (8.3s)
+  [Momentum] Day 150/366  (12.4s)
+  [Momentum] Day 200/366  (16.5s)
+  [Momentum] Day 250/366  (19.8s)
+  [Momentum] Day 300/366  (24.0s)
+  [Momentum] Day 350/366  (28.2s)
+  [Momentum] Completed 366 days in 29.6s
+
+  [Momentum]
+    Annual Det DP:    $    38,681
+    Annual POMDP:     $    20,745
+    Annual info value:$    17,936
+    Capture rate:           53.6%
+    Negative days:            21
+    Median converge:          4p (2.0h)
+    Never converge:           71
+
+==========================================================================================
+=== Regime-by-Regime Comparison: Standard vs Momentum ===
+
+==========================================================================================
+    Regime   Days   Std Cap   Mom Cap    Diff  Std Conv  Mom Conv    Std Info    Mom Info
+==========================================================================================
+        r0     64     21.5%     17.0%   -4.5%       12p       13p  $      966  $     1022
+        r1    249     60.5%     54.2%   -6.3%        4p        3p  $     3944  $     4576
+        r2     53     54.5%     55.1%   +0.6%       16p       15p  $    12508  $    12338
+  ----------------------------------------------------------------------------------------
+     TOTAL    366     55.0%     53.6%   -1.3%                      $    17418  $    17936
+
+=== Days where momentum helps most ===
+
+  Top 10 days where momentum improves revenue:
+          Date  Regime        DP       Std       Mom      Diff
+    2024-11-26  r2     $ 387.14  $  44.61  $ 347.08  $+302.48
+    2024-02-29  r2     $1575.70  $ 169.31  $ 385.80  $+216.49
+    2024-07-29  r2     $ 310.65  $ 147.76  $ 220.06  $ +72.30
+    2024-02-23  r2     $ 281.64  $ 154.94  $ 224.83  $ +69.89
+    2024-07-31  r2     $ 283.13  $ 205.33  $ 251.39  $ +46.05
+    2024-12-06  r2     $ 569.10  $ 535.35  $ 557.84  $ +22.49
+    2024-01-26  r2     $ 141.73  $ 108.81  $ 128.31  $ +19.51
+    2024-10-15  r2     $ 167.03  $ 125.12  $ 143.68  $ +18.56
+    2024-05-09  r2     $  61.59  $  13.20  $  27.67  $ +14.47
+    2024-06-18  r2     $  79.10  $  35.61  $  47.78  $ +12.17
+
+  Top 10 days where momentum hurts revenue:
+          Date  Regime        DP       Std       Mom      Diff
+    2024-05-20  r2     $ 353.37  $ 316.34  $  88.67  $-227.66
+    2024-08-05  r2     $3793.81  $2493.99  $2383.92  $-110.07
+    2024-11-27  r2     $2028.99  $ 974.98  $ 873.53  $-101.45
+    2024-12-02  r2     $1284.41  $1248.40  $1177.15  $ -71.24
+    2024-12-12  r2     $ 337.65  $ 156.71  $ 109.51  $ -47.21
+    2024-06-13  r2     $ 127.87  $  93.30  $  52.78  $ -40.52
+    2024-06-02  r1     $  41.58  $  27.26  $   3.27  $ -23.99
+    2024-12-07  r2     $  86.52  $  66.95  $  51.59  $ -15.35
+    2024-07-01  r1     $  74.83  $  49.61  $  34.76  $ -14.85
+    2024-07-16  r1     $  36.99  $  29.97  $  15.40  $ -14.57
+
+  Day-level statistics:
+    Days momentum helps:  105
+    Days momentum hurts:  260
+    Days no difference:   1
+    Mean diff: $-1.42/day
+    Total diff: $-518/year

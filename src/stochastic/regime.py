@@ -11,8 +11,8 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
 # Revenue boundaries (A$/day) - same as existing analysis
-REGIME_NAMES = ['low', 'typical', 'high', 'vhigh', 'spike']
 N_REGIMES = 5
+REGIME_NAMES = [f'r{i}' for i in range(N_REGIMES)]
 
 def load_price_features(price_csv_path):
     """
@@ -173,13 +173,13 @@ def compute_priors(day_df: pd.DataFrame, smooth_alpha=0.5) -> dict:
         subset = day_df[mask]
         total = len(subset)
 
-        counts = np.zeros(5)
-        for idx in range(5):
+        counts = np.zeros(N_REGIMES)
+        for idx in range(N_REGIMES):
             counts[idx] = (subset['regime_idx'] == idx).sum()
 
         # Laplace smoothing: add alpha to each count
         counts += smooth_alpha
-        priors[day_type] = counts / total
+        priors[day_type] = counts / counts.sum()
 
     return priors
 
@@ -229,8 +229,9 @@ def summary(day_df, priors, kmeans_info):
 
 
 if __name__ == '__main__':
+    
     day_df, kmeans_info = classify_days(
-        price_csv_path='data/aemo/nem_prices_NSW1_clean.csv',
+        price_csv_path='data/aemo/nem_prices_NSW1_2021_2025_clean.csv',
         annual_results_path='data/pypsa/annual_dispatch_results.csv'
     )
     priors = compute_priors(day_df)

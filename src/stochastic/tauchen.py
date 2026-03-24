@@ -7,7 +7,10 @@ using a common percentile-based price grid across all regimes.
 
 import numpy as np
 import pandas as pd 
+from src.stochastic.regime import N_REGIMES
 
+N_MOMENTUM = 3
+MOMENTUM_NAMES = ['falling', 'stable', 'rising']
 
 def build_price_grid(all_prices: np.ndarray, n_bulk_bins: int=20, 
                      tail_edges: list | None = None):
@@ -129,7 +132,7 @@ def build_price_matrix(price_csv_path: str, day_df: np.ndarray):
 
 def build_transition_matrices(
         price_matrix: np.ndarray, day_regimes: np.ndarray,
-        bin_edges: np.ndarray, n_regimes: int = 5, 
+        bin_edges: np.ndarray, n_regimes: int = N_REGIMES, 
         smooth_alpha: float = 0.1) -> np.ndarray:
     """
     Estimate P_theta(j' | j, t) for each regime and time step.
@@ -178,7 +181,7 @@ def build_transition_matrices(
     # Normalise over j'
     row_sums = smoothed.sum(axis=3, keepdims=True)
     # Safety: avoid division by zero (shouldn't happen with smoothing)
-    # row_sums[row_sums == 0] = 1
+    row_sums[row_sums == 0] = 1
     trans = smoothed / row_sums
 
     return trans
@@ -232,35 +235,199 @@ def validate_transitions(
               f"mid = {bin_mids[i]:>9.1f}")
         
 
+def get_momentum_idx(j_now, j_prev):
+    """
+    Discretise price momentum into 3 categories. 
+    Works with scalars or arrays.
+    
+    Args:
+        j_now: current price bin index
+        j_prev: previous price bin index
+    
+    Returns:
+        0 = falling (dropped 2+ bins)
+        1 = stable  (within 1 bin)
+        2 = rising  (rose 2+ bins)
+    """
+    diff = np.asarray(j_now) - np.asarray(j_prev)
+    result = np.ones_like(diff)          # default: stable (1)
+    result[diff <= -2] = 0               # falling
+    result[diff >= 2] = 2                # rising
+    return int(result) if result.ndim == 0 else result
+
+
+def build_momentum_transition_matrices(
+        price_matrix, day_regimes, bin_edges,
+        n_regimes=N_REGIMES, n_momentum=N_MOMENTUM,
+        smooth_alpha=0.1,
+):
+    """
+    Estimate P_theta(j' | j, m, t) for each regime, momentum, and time step.
+    
+    Args:
+        price_matrix: (n_days, 48)
+        day_regimes: (n_days,)
+        bin_edges: (n_bins + 1,)
+        n_regimes: number of regimes
+        n_momentum: number of momentum bins (3)
+        smooth_alpha: Laplace smoothing
+    
+    Returns:
+        trans: shape (n_regimes, 47, n_bins, n_momentum, n_bins)
+               trans[theta, t, j, m, j'] = P_theta(j' | j, m, t)
+    """
+    n_bins = len(bin_edges) - 1
+    n_steps = 47
+    n_days = price_matrix.shape[0]
+
+    counts = np.zeros((n_regimes, n_steps, n_bins, n_momentum, n_bins))
+
+    for d in range(n_days):
+        theta = day_regimes[d]
+        prices = price_matrix[d]
+        if np.any(np.isnan(prices)):
+            continue
+
+        # Bin all 48 prices at once
+        bins = get_bin_index(prices, bin_edges)     # shape (48,)
+
+        # Momentum for all 47 transitions at once
+        # m[t] momentum at time t, based on bins[t] - bins[t-1]
+        # t=0: no previous price, default to stable (1)
+        m = np.ones(n_steps, dtype=int)             # shape (47,) default stable
+        m[1:] = get_momentum_idx(bins[1:-1], bins[:-2])     # t = 1..46
+
+        # Current bin, next bin for all transitions
+        # Current bin, next bin for all transitions
+        j_all = bins[:-1]                           # shape (47,)  bins at t
+        j_next_all = bins[1:]                       # shape (47,)  bins at t+1
+        t_all = np.arange(n_steps)                  # shape (47,)  time indices
+        
+        # Increment counts using advanced indexing
+        # counts[theta, t, j, m, j'] += 1 for all t at once
+        np.add.at(
+            counts,
+            (theta, t_all, j_all, m, j_next_all),
+            1
+        )
+
+        # Normalise: for each (theta, t, j, m), normalise over j'
+    smoothed = counts + smooth_alpha
+    row_sums = smoothed.sum(axis=4, keepdims=True)
+    row_sums[row_sums == 0] = 1
+    trans = smoothed / row_sums
+    
+    return trans
+
+
 if __name__ == '__main__':
-    from src.stochastic.regime import classify_days, REGIME_NAMES
+    from src.stochastic.regime import classify_days, REGIME_NAMES, N_REGIMES
     
     # --- Load data ---
     day_df, kmeans_info = classify_days(
-        price_csv_path='data/aemo/nem_prices_NSW1_clean.csv',
+        price_csv_path='data/aemo/nem_prices_NSW1_2018_2023_clean.csv',
         annual_results_path='data/pypsa/annual_dispatch_results.csv'
     )
     
     # --- Build price matrix ---
     price_matrix, valid_mask = build_price_matrix(
-        'data/aemo/nem_prices_NSW1_clean.csv', day_df
+        'data/aemo/nem_prices_NSW1_2018_2023_clean.csv', day_df
     )
     print(f"Valid days: {valid_mask.sum()} / {len(valid_mask)}")
     
-    # Filter to valid days only
     price_matrix = price_matrix[valid_mask]
     day_regimes = day_df['regime_idx'].values[valid_mask]
     
     # --- Build price grid ---
     bin_edges, bin_mids = build_price_grid(price_matrix, n_bulk_bins=20)
     
-    # --- Build transition matrices ---
+    # --- Build standard transition matrices ---
+    print("\n=== Standard Transition Matrices ===")
     trans = build_transition_matrices(
         price_matrix, day_regimes, bin_edges,
-        n_regimes=5, smooth_alpha=0.1
+        n_regimes=N_REGIMES, smooth_alpha=0.1
     )
-    print(f"Transition matrices shape: {trans.shape}")
+    print(f"  Shape: {trans.shape}")
+    validate_transitions(trans, bin_edges, bin_mids, day_regimes, REGIME_NAMES)
     
-    # --- Validate ---
-    validate_transitions(trans, bin_edges, bin_mids, day_regimes,
-                          REGIME_NAMES)
+    # --- Build momentum transition matrices ---
+    print("\n=== Momentum Transition Matrices ===")
+    trans_m = build_momentum_transition_matrices(
+        price_matrix, day_regimes, bin_edges,
+        n_regimes=N_REGIMES, smooth_alpha=0.1
+    )
+    print(f"  Shape: {trans_m.shape}")
+    
+    # Validate momentum matrices
+    n_regimes, n_steps, n_bins, n_momentum, _ = trans_m.shape
+    
+    # Check row sums
+    row_sums = trans_m.sum(axis=4)
+    max_err = np.max(np.abs(row_sums - 1.0))
+    print(f"  Row sum error: {max_err:.2e}")
+    
+    # Self-transition by momentum state
+    print(f"\n  Mean self-transition by momentum:")
+    print(f"  {'Regime':>8s}  {'Falling':>8s}  {'Stable':>8s}  {'Rising':>8s}")
+    for theta in range(N_REGIMES):
+        name = REGIME_NAMES[theta] if theta < len(REGIME_NAMES) else f'r{theta}'
+        self_trans = []
+        for mi in range(n_momentum):
+            st = np.mean([
+                trans_m[theta, t, j, mi, j]
+                for t in range(n_steps)
+                for j in range(n_bins)
+            ])
+            self_trans.append(st)
+        print(f"  {name:>8s}  {self_trans[0]:>8.3f}  {self_trans[1]:>8.3f}  "
+              f"{self_trans[2]:>8.3f}")
+    
+    # Count observations per momentum state
+    print(f"\n  Transition counts by momentum (before smoothing):")
+    print(f"  {'Regime':>8s}  {'Falling':>8s}  {'Stable':>8s}  {'Rising':>8s}  {'Total':>8s}")
+    
+    # Recount to check distribution
+    n_days = price_matrix.shape[0]
+    m_counts = np.zeros((N_REGIMES, n_momentum))
+    for d in range(n_days):
+        theta = day_regimes[d]
+        if np.any(np.isnan(price_matrix[d])):
+            continue
+        bins = get_bin_index(price_matrix[d], bin_edges)
+        m = np.ones(47, dtype=int)
+        m[1:] = get_momentum_idx(bins[1:-1], bins[:-2])
+        for mi in range(n_momentum):
+            m_counts[theta, mi] += (m == mi).sum()
+    
+    for theta in range(N_REGIMES):
+        name = REGIME_NAMES[theta] if theta < len(REGIME_NAMES) else f'r{theta}'
+        total = m_counts[theta].sum()
+        print(f"  {name:>8s}  {m_counts[theta, 0]:>8.0f}  "
+              f"{m_counts[theta, 1]:>8.0f}  {m_counts[theta, 2]:>8.0f}  "
+              f"{total:>8.0f}")
+    
+    # Compare: does momentum-conditional differ from unconditional?
+    print(f"\n  Divergence: momentum-conditional vs unconditional")
+    print(f"  (KL divergence averaged over regimes, time steps, price bins)")
+    print(f"  {'Regime':>8s}  {'Falling':>10s}  {'Stable':>10s}  {'Rising':>10s}")
+    
+    for theta in range(N_REGIMES):
+        name = REGIME_NAMES[theta] if theta < len(REGIME_NAMES) else f'r{theta}'
+        kl_by_m = []
+        for mi in range(n_momentum):
+            kl_sum = 0
+            count = 0
+            for t in range(n_steps):
+                for j in range(n_bins):
+                    p = trans_m[theta, t, j, mi, :]   # momentum-conditional
+                    q = trans[theta, t, j, :]          # unconditional
+                    # KL(p || q), avoiding log(0)
+                    mask = (p > 1e-10) & (q > 1e-10)
+                    if mask.sum() > 0:
+                        kl = np.sum(p[mask] * np.log(p[mask] / q[mask]))
+                        kl_sum += kl
+                        count += 1
+            kl_avg = kl_sum / count if count > 0 else 0
+            kl_by_m.append(kl_avg)
+        print(f"  {name:>8s}  {kl_by_m[0]:>10.4f}  {kl_by_m[1]:>10.4f}  "
+              f"{kl_by_m[2]:>10.4f}")

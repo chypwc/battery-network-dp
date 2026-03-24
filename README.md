@@ -4,11 +4,9 @@
 
 Community batteries are shared energy storage systems installed on suburban distribution networks, charging from rooftop solar during the day and discharging during evening peak demand. They provide two forms of value: **arbitrage revenue** (buying electricity when cheap, selling when expensive) and **network support** (preventing voltage violations that would otherwise require costly infrastructure upgrades).
 
-This project builds a decision-support framework that jointly optimises these two objectives. A dynamic programming (DP) solver finds the revenue-maximising battery dispatch. A reinforcement learning (RL) agent extends this by embedding distribution network voltage constraints — learned through interaction with an OpenDSS power flow model — directly into the dispatch policy. A full-year PyPSA analysis quantifies annual revenue under both wholesale spot and retail time-of-use (TOU) pricing across 366 days of real NEM prices.
+This project builds a decision-support framework that jointly optimises these two objectives using three models: deterministic dynamic programming (DP) for revenue-maximising dispatch, Q-learning (RL) for network-safe dispatch with voltage constraints, and a stochastic DP (POMDP) for dispatch under price uncertainty with Bayesian belief updating. A full-year analysis quantifies annual revenue under both wholesale spot and retail time-of-use (TOU) pricing across 366 days of real NEM prices.
 
 ### System Under Study
-
-The analysis centres on a specific battery and feeder configuration:
 
 | Component | Specification |
 |-----------|---------------|
@@ -20,8 +18,6 @@ The analysis centres on a specific battery and feeder configuration:
 | Voltage limits | 0.94–1.10 pu (AS 61000.3.100: 230V +10%/−6%) |
 | Price data | AEMO NSW1, calendar year 2024 (366 days) |
 
-Without the battery, the feeder has 11 baseline voltage violations at end-of-feeder nodes during morning (06:00–07:00) and evening (17:00–20:30) peaks. A 9-configuration sensitivity grid (±50/80/100 kW × 200/300/400 kWh) is also evaluated.
-
 ### Two Business Models
 
 The battery's revenue depends on which price signal it responds to. For full details, see [docs/business_models.md](docs/business_models.md).
@@ -32,25 +28,6 @@ The battery's revenue depends on which price signal it responds to. For full det
 | **Revenue type** | Cash settlement with AEMO | Bill reduction for participating households |
 | **Typical daily spread** | A\$213/MWh (median), up to A\$17,500 on spike days | A\$281/MWh (guaranteed, every day) |
 
-### The Core Problem
-
-Unconstrained battery dispatch — the schedule that maximises arbitrage revenue — causes voltage violations on the distribution feeder. Running the DP-optimal dispatch through OpenDSS on every day of 2024 (±100kW / 200kWh configuration):
-
-| | PyPSA (continuous LP) | DP (discrete) |
-|---|:---:|:---:|
-| Days with violations | **366 / 366** | **366 / 366** |
-| Total violations/year | 3,242 | 3,021 |
-| Mean violations/day | 8.9 | 8.3 |
-
-Every single day has violations. The problem is structural: the feeder's cable impedance means that any significant battery dispatch at Node A4 causes bus voltages to exceed the ±6%/+10% limits. Heuristic approaches (tightening dispatch limits via a DP feedback loop) reduce but cannot eliminate violations.
-
-![Violations Heatmap](docs/figures/violations_heatmap.png)
-*DP dispatch voltage violations across 366 days × 48 half-hour periods. Red cells indicate voltage excursions beyond AS 61000.3.100 limits. Violations cluster in the morning (06:00–07:00) and evening (17:00–21:00) peaks — the same periods every day, regardless of price level.*
-
-### The Solution
-
-Q-learning with OpenDSS voltage feedback achieves **zero violations across all configurations, all price regimes, and both business models** — at a cost of just 3.2% of annual revenue. The RL agent discovers dispatch strategies that no static constraint adjustment can find: pre-charging before morning peaks, conservative early evening discharge, and rapid charge/discharge oscillation during violation-prone periods.
-
 ### Headline Results (±100kW / 200kWh)
 
 | | Model A: Spot | Model B: TOU |
@@ -58,29 +35,52 @@ Q-learning with OpenDSS voltage feedback achieves **zero violations across all c
 | Annual revenue (RL, network-safe) | A\$37,422 | A\$29,790 |
 | Revenue certainty | 44% depends on 10 spike days/year | Guaranteed every day |
 | NPV (Tier 1, 20yr) | Depends on spike assumptions | **+A\$139,083** |
-
-TOU dominates on a risk-adjusted basis. Spot earns more in expectation but depends on unpredictable price spikes. TOU provides guaranteed daily revenue that makes the investment bankable.
+| Value of perfect price information | A\$15,277/year (39.5%) | N/A (fixed prices) |
 
 ---
 
-## Battery Dispatch Optimisation
+## 1. The Arbitrage Problem
 
-### The Arbitrage Problem
+A battery operator maximises revenue by charging when electricity is cheap and discharging when expensive. The core challenge has two dimensions:
 
-A battery operator maximises revenue by charging when electricity is cheap and discharging when expensive. This is a finite-horizon deterministic dynamic programming problem solved by backward induction over the Bellman equation:
+**Revenue optimisation.** The operator must decide how much to charge or discharge at each half-hour period to maximise the spread between buy and sell prices, subject to battery physics (capacity, efficiency, power limits).
 
-$$V_t(s) = \max_{a \in \mathcal{A}(s,t)} \left[ r(s, a, p_t) + V_{t+1}(s') \right], \quad t = T{-}1, \ldots, 0$$
+**Network feasibility.** Unconstrained dispatch causes voltage violations on the distribution feeder. Running the DP-optimal dispatch through OpenDSS on every day of 2024:
 
-with terminal condition $V_T(s) = 0$ for all $s$.
+| | PyPSA (continuous LP) | DP (discrete) |
+|---|:---:|:---:|
+| Days with violations | **366 / 366** | **366 / 366** |
+| Total violations/year | 3,242 | 3,021 |
+| Mean violations/day | 8.9 | 8.3 |
 
-| Symbol | Code | Meaning |
-|--------|------|---------|
-| $t$ | `t` | Time step (0 = 00:00, ..., 47 = 23:30) |
-| $s$ | `soc` | State of charge (kWh) |
-| $a$ | `action_kw` | Charge (+kW) or discharge (−kW) |
-| $p_t$ | `prices[t]` | Price at time $t$ (A\$/MWh) |
-| $s'$ | `s_next` | SoC after action $a$ |
-| $V_t(s)$ | `V[t][i]` | Max future revenue from state $s$ at time $t$ |
+Every single day has violations. The problem is structural: the feeder's cable impedance means that any significant battery dispatch at Node A4 causes bus voltages to exceed the ±6%/+10% limits.
+
+![Violations Heatmap](docs/figures/violations_heatmap.png)
+*DP dispatch voltage violations across 366 days × 48 half-hour periods. Red cells indicate voltage excursions beyond AS 61000.3.100 limits. Violations cluster in the morning (06:00–07:00) and evening (17:00–21:00) peaks — the same periods every day, regardless of price level.*
+
+**Price uncertainty.** The deterministic models (DP, RL) assume perfect price foresight — the controller knows all 48 prices at the start of each day. In practice, prices are revealed sequentially. How much is that foresight worth?
+
+### Shared Mathematical Components
+
+All three models share the same battery physics:
+
+**State transition.** The battery's state of charge evolves differently for charging and discharging due to conversion losses:
+
+$$s' = \begin{cases} s + \eta_c \cdot a \cdot \Delta t & \text{if } a \geq 0 \text{ (charging)} \\\\ s + \dfrac{a}{\eta_d} \cdot \Delta t & \text{if } a < 0 \text{ (discharging)} \end{cases}$$
+
+Parameters: $\eta_c = \eta_d = 0.95$, $\Delta t = 0.5$ h.
+
+**Reward function:**
+
+$$r(s, a, p_t) = -\frac{p_t}{1000} \cdot a \cdot \Delta t - c_{\text{deg}} \cdot |a| \cdot \Delta t$$
+
+The first term is arbitrage revenue (positive when discharging at high prices). The second term is degradation cost ($c_{\text{deg}} = 0.02$ A\$/kWh throughput).
+
+**Feasible action set:**
+
+$$\mathcal{A}(s, t) = \lbrace a \in [-\bar{a}, \bar{a}] \mid s_{\min} \leq s' \leq s_{\max} \rbrace$$
+
+Actions are bounded by the dispatch limit $\bar{a}$ (kW) and by the requirement that the next SoC stays within $s_{\min} = 0.1 \times E_{\text{rated}}$ to $s_{\max} = E_{\text{rated}}$.
 
 The Bellman equation is identical for both business models — only the price vector $p_t$ changes:
 
@@ -92,45 +92,43 @@ prices_spot = load_day_prices('data/aemo/prices_typical_2024-06-28.csv')
 prices_tou = build_tou_profile()  # [160, 160, ..., 290, ..., 441, ...]
 ```
 
-This separation of optimisation algorithm from price signal is a key design feature. The same DP solver, Q-learning agent, and OpenDSS network model are reused across business models — only the 48-element price vector changes.
+---
 
-### State Transition
+## 2. Models
 
-The battery's state of charge evolves differently for charging and discharging due to conversion losses:
+### Model 1: Dynamic Programming (Deterministic, Perfect Foresight)
 
-$$s' = \begin{cases} s + \eta_c \cdot a \cdot \Delta t & \text{if } a \geq 0 \text{ (charging)} \\\\ s + \dfrac{a}{\eta_d} \cdot \Delta t & \text{if } a < 0 \text{ (discharging)} \end{cases}$$
+The DP solver assumes the controller knows the full day's price trajectory in advance. It finds the globally optimal dispatch by backward induction over the Bellman equation:
 
-When charging, the grid delivers $a \cdot \Delta t$ kWh but only $\eta_c \cdot a \cdot \Delta t$ reaches the battery (the rest is lost as heat). When discharging, the battery must release $|a| \cdot \Delta t / \eta_d$ kWh internally to deliver $|a| \cdot \Delta t$ to the grid. Parameters: $\eta_c = \eta_d = 0.95$, $\Delta t = 0.5$ h.
+$$V_t(s) = \max_{a \in \mathcal{A}(s,t)} \left[ r(s, a, p_t) + V_{t+1}(s') \right], \quad t = T{-}1, \ldots, 0$$
 
-### Reward Function
+with terminal condition $V_T(s) = 0$ for all $s$.
 
-$$r(s, a, p_t) = -\frac{p_t}{1000} \cdot a \cdot \Delta t - c_{\text{deg}} \cdot |a| \cdot \Delta t$$
+| Symbol | Code | Meaning |
+|--------|------|---------|
+| $t$ | `t` | Time step (0 = 00:00, ..., 47 = 23:30) |
+| $s$ | `soc` | State of charge (kWh) |
+| $a$ | `action_kw` | Charge (+kW) or discharge (−kW) |
+| $p_t$ | `prices[t]` | Price at time $t$ (A\$/MWh) |
+| $V_t(s)$ | `V[t][i]` | Max future revenue from state $s$ at time $t$ |
 
-The first term is arbitrage revenue. When charging ($a > 0$), the battery buys electricity at price $p_t$, producing a cost (negative reward). When discharging ($a < 0$), the battery sells electricity, producing income (positive reward). The division by 1000 converts A\$/MWh to A\$/kWh. The second term is battery degradation cost ($c_{\text{deg}} = 0.02$ A\$/kWh throughput), representing the shortened battery lifetime from cycling.
+This provides the **upper bound** on achievable revenue — no causal controller can earn more. However, the DP has no knowledge of network voltage and produces violations on every day.
 
-### Feasible Action Set
+### Model 2: Q-Learning (Deterministic, Network-Safe)
 
-$$\mathcal{A}(s, t) = \lbrace a \in [-\bar{a}, \bar{a}] \mid s_{\min} \leq s' \leq s_{\max} \rbrace$$
-
-Actions are bounded by the dispatch limit $\bar{a}$ (kW) and by the requirement that the next SoC stays within the battery's operating range: $s_{\min} = 0.1 \times E_{\text{rated}}$ (10% reserve) to $s_{\max} = E_{\text{rated}}$ (full capacity).
-
-### Q-Learning Extension
-
-The DP solver maximises revenue but has no knowledge of network voltage. Q-learning addresses this by embedding the OpenDSS voltage response directly into the reward signal. The agent interacts with an environment where each action produces both revenue and a voltage violation penalty.
+Q-learning extends the DP by embedding the OpenDSS voltage response directly into the reward signal. The agent learns to avoid voltage violations through interaction with the network model.
 
 **Reward with violation penalty:**
 
 $$r_t = r_{\text{arb}}(s_t, a_t, p_t) - \lambda \cdot n_{\text{viol},t}$$
 
-where $r_{\text{arb}}$ is the arbitrage reward (same as DP), $\lambda$ is the violation penalty (scaled to 10% of the day's price spread, minimum A\$5), and $n_{\text{viol},t}$ is the number of bus phases with voltage outside the 0.94–1.10 pu range, determined by OpenDSS power flow.
+where $\lambda$ is the violation penalty (scaled to 10% of the day's price spread, minimum A\$5) and $n_{\text{viol},t}$ is the number of bus phases with voltage outside the 0.94–1.10 pu range, determined by OpenDSS power flow.
 
-**Q-learning update.** The agent maintains a Q-table $Q(s, t, a)$ indexed by discretised SoC bin, time step, and action index. After each transition:
+**Q-learning update:**
 
 $$Q(s_t, t, a_t) \leftarrow Q(s_t, t, a_t) + \alpha_t \left[ r_t + \gamma \max_{a'} Q(s_{t+1}, t{+}1, a') - Q(s_t, t, a_t) \right]$$
 
-Both the learning rate $\alpha_t$ and exploration rate $\epsilon_t$ decay exponentially over training episodes.
-
-**Two-phase training.** A single penalty value cannot simultaneously encourage arbitrage exploration and violation avoidance. Training proceeds in two phases:
+**Two-phase training.** A single penalty value cannot simultaneously encourage arbitrage exploration and violation avoidance:
 
 | | Phase 1: Arbitrage | Phase 2: Network Safety |
 |---|---|---|
@@ -141,17 +139,58 @@ Both the learning rate $\alpha_t$ and exploration rate $\epsilon_t$ decay expone
 | Epsilon | 0.3 → 0.05 | 0.1 → 0.001 |
 | Episodes | 50,000 | 100,000 |
 
-Phase 1 uses $\lambda = 0$ and skips OpenDSS calls entirely, running ~100× faster than Phase 2. The Q-table is initialised from the DP value function: for each SoC bin and time step, the DP's optimal action receives a Q-value equal to the interpolated $V_t(s)$.
+Phase 1 learns a profitable strategy without network calls (~100× faster). Phase 2 refines for voltage feasibility with OpenDSS feedback.
 
-Phase 2 enables OpenDSS and introduces the violation penalty. The agent starts with a profitable strategy from Phase 1 and makes targeted adjustments at violation periods. Lower initial epsilon protects the good arbitrage strategy while allowing exploration at critical evening periods.
+For full mathematical formulation including discretisation and hyperparameters, see [docs/methods.md](docs/methods.md).
 
-For full mathematical formulation including discretisation, hyperparameter selection, and the DP feedback loop, see [docs/methods.md](docs/methods.md).
+### Model 3: Stochastic DP with Bayesian Belief Updating (POMDP)
+
+The deterministic models assume the controller knows all 48 prices at the start of each day. The POMDP relaxes this assumption: the agent observes prices sequentially and maintains a probabilistic belief about which **price regime** the day belongs to.
+
+**Regime classification.** Days are classified into 5 regimes using k-means on (log spread, log mean) of daily prices. Each regime has distinct half-hour price transition matrices estimated from historical data (2,191 days, AEMO NSW1, 2018–2023).
+
+**Bellman equation.** The value function over state $(t, s, j, b)$ — time, SoC, current price bin, and belief vector — satisfies:
+
+$$V_t(s, j, b) = \max_{a \in \mathcal{A}(s)} \left[ r(s, a, \bar{p}_j) + \sum_{j'} Q(j' \mid j, b, t) \cdot V_{t+1}\bigl(s', j', b'(j')\bigr) \right]$$
+
+where $Q(j' \mid j, b, t) = \sum_\theta b(\theta) \cdot P_\theta(j' \mid j, t)$ is the belief-weighted probability of next price bin $j'$, and $b'(\theta \mid j')$ is the Bayesian-updated belief if $j'$ is observed.
+
+**Bayesian belief update.** After observing a price transition from bin $j_{t-1}$ to bin $j_t$:
+
+$$b_t(\theta) \propto b_{t-1}(\theta) \times P_\theta(j_t \mid j_{t-1}, t-1)$$
+
+where $P_\theta(j_t \mid j_{t-1}, t-1)$ is the regime-specific Tauchen transition probability. At $t = 0$ (no previous price): $b_0(\theta) \propto b_{-1}(\theta) \times f_\theta(j_0 \mid t{=}0)$, where $b_{-1}$ is the prior from weekday/weekend regime frequencies.
+
+**Price transition model.** Half-hour prices are discretised into 24 bins (20 percentile-based + 4 hand-placed tail bins for spikes). Regime-specific transition matrices $P_\theta(j' \mid j, t)$ are estimated from training data with Laplace smoothing ($\alpha = 0.1$). The belief vector is discretised to 18 representative points on the simplex.
+
+For the full formulation including Tauchen estimation, belief grid design, and additional experiments, see [docs/stochastic_dp.md](docs/stochastic_dp.md).
 
 ---
 
-## Distribution Network Model
+## 3. Data and Distribution Network
 
-### Feeder Topology
+### Price Data
+
+| Dataset | Period | Days | Purpose |
+|---------|--------|------|---------|
+| AEMO NSW1 2024 | Jan–Dec 2024 | 366 | DP/RL evaluation, POMDP test set |
+| AEMO NSW1 2018–2023 | Jan 2018–Dec 2023 | 2,191 | POMDP training (Tauchen matrices, regime classification) |
+
+Source: AEMO aggregated price and demand data, 5-minute dispatch intervals resampled to 30-minute NEM settlement periods.
+
+| Year | Mean Price (A\$/MWh) | Median Spread | Days with spread > A\$1,000 |
+|------|---------------------|---------------|----------------------------|
+| 2018 | \$97 | \$93 | 3 |
+| 2019 | \$80 | \$102 | 3 |
+| 2020 | \$60 | \$76 | 15 |
+| 2021 | \$73 | \$130 | 29 |
+| 2022 | \$183 | \$214 | 20 |
+| 2023 | \$96 | \$222 | 19 |
+| **2024** | **\$131** | **\$245** | **36** |
+
+2024 had the highest volatility — mean spread A\$818, providing a challenging out-of-sample test for the POMDP.
+
+### Distribution Network (OpenDSS)
 
 ```
 [ 11 kV Grid ]
@@ -178,15 +217,15 @@ BranchA  BranchB           ← identical topology, symmetric loads
   [Battery]                 ← community battery at end of Branch A
 ```
 
-32 houses (16 per branch), 20 × 6.6 kW PV systems, 200 kVA transformer, 95mm² underground cable. Voltage limits: 0.94–1.10 pu (AS 61000.3.100). Without the battery, the feeder has 11 baseline voltage violations during morning and evening peaks at end-of-feeder nodes.
+32 houses (16 per branch), 20 × 6.6 kW PV systems, 200 kVA transformer, 95mm² underground cable. Three-phase with unbalanced single-phase loads. Voltage limits: 0.94–1.10 pu (AS 61000.3.100). Without the battery, the feeder has 11 baseline voltage violations during morning and evening peaks at end-of-feeder nodes.
 
 ---
 
-## Results
+## 4. Results
 
-### Model A: Wholesale Spot Arbitrage
+### 4.1 DP and Q-Learning: Network-Safe Dispatch
 
-#### DP vs Q-Learning (Single Typical Day)
+#### Model A: Wholesale Spot (Single Typical Day)
 
 | Config | DP Revenue | DP Viol | RL Revenue | RL Viol | Revenue Gap |
 |--------|:---:|:---:|:---:|:---:|:---:|
@@ -212,12 +251,12 @@ The RL agent discovers three strategies that the DP cannot find:
 
 **Late evening oscillation.** At 19:00–21:00, where DP's battery is empty, RL rapidly cycles ±40 kW — each discharge pulse lifts voltage, each charge pulse refills for the next pulse. Revenue-negative (~A\$0.50/cycle) but prevents the most severe violations.
 
-These strategies require knowledge of the voltage response that only exists in the OpenDSS model. The DP feedback loop cannot discover oscillation because it is revenue-suboptimal at every individual time step. For detailed dispatch profiles and strategy analysis across all 9 configurations, see [docs/dp_vs_rl_findings.md](docs/dp_vs_rl_findings.md).
+These strategies require knowledge of the voltage response that only exists in the OpenDSS model. For detailed dispatch profiles across all configurations, see [docs/dp_vs_rl_findings.md](docs/dp_vs_rl_findings.md).
 
 ![Dispatch Comparison](docs/figures/dispatch_comparison.png)
 *Three-method dispatch comparison on a typical spot day (2024-06-28). Top: spot price profile. Middle: battery power — PyPSA (continuous LP), DP (discrete), and RL (network-safe). Bottom: state of charge. The RL oscillation during 18:00–21:00 (green shaded region) is the key voltage support strategy that eliminates evening violations.*
 
-### Model B: Retail TOU Arbitrage
+#### Model B: Retail TOU
 
 | Config | TOU DP | DP Viol | TOU RL | RL Viol | Revenue Gap |
 |--------|:---:|:---:|:---:|:---:|:---:|
@@ -226,13 +265,13 @@ These strategies require knowledge of the voltage response that only exists in t
 | ±100kW / 200kWh | A\$85.23 | 7 | A\$81.56 | **0** | -A\$3.67 |
 | ±100kW / 400kWh | A\$158.43 | 9 | A\$137.58 | **0** | -A\$20.85 |
 
-TOU RL revenue is 2–3× higher than spot RL across all configurations. A 200 kWh battery under TOU (A\$29,769/yr) earns more than a 400 kWh battery under spot (A\$17,706/yr). The business model choice has a larger impact on viability than battery sizing. For the full business model comparison, see [docs/business_models.md](docs/business_models.md).
+TOU RL revenue is 2–3× higher than spot RL across all configurations. For the full business model comparison, see [docs/business_models.md](docs/business_models.md).
 
-### Full-Year Analysis (±100kW / 200kWh)
+#### Full-Year Analysis (±100kW / 200kWh)
 
-PyPSA linear optimisation and DP backward induction were run on every day of 2024 (366 days), with each dispatch verified through OpenDSS for voltage violations. RL was trained on 5 representative days (one per revenue bucket) and the RL/DP ratio applied to the full-year DP results.
+PyPSA linear optimisation and DP backward induction were run on every day of 2024 (366 days), with each dispatch verified through OpenDSS for voltage violations.
 
-#### Annual Revenue
+**Annual revenue:**
 
 | Method | Annual | Daily Mean | Violations/Year |
 |--------|------:|------:|:---:|
@@ -243,7 +282,7 @@ PyPSA linear optimisation and DP backward induction were run on every day of 202
 
 Network safety cost: A\$1,239/year (3.2% of DP revenue).
 
-#### Revenue Distribution
+**Revenue distribution:**
 
 | Bucket | Days | DP Revenue | Estimated RL Revenue |
 |--------|:---:|------:|------:|
@@ -253,12 +292,12 @@ Network safety cost: A\$1,239/year (3.2% of DP revenue).
 | Very high (A\$100–500) | 26 | A\$7,277 | A\$7,193 |
 | Spike (> A\$500) | 10 | A\$15,885 | A\$15,772 |
 
-The top 10 spike days (2.7% of the year) contribute 44% of annual revenue. Without them, spot falls well below TOU.
+The top 10 spike days (2.7% of the year) contribute 44% of annual revenue.
 
 ![Revenue Distribution](docs/figures/revenue_histogram.png)
-*Daily spot revenue (PyPSA unconstrained LP) across 366 days of 2024. Network-safe (RL) revenue is approximately 3% lower but follows the same distribution. Most days earn A\$10–50, but rare spike days (clipped at A\$200 in this view) dominate the annual total. The median (A\$31) is far below the mean (A\$99) due to extreme right skew. TOU daily revenue (A\$82) exceeds the spot median every day.*
+*Daily spot revenue (PyPSA unconstrained LP) across 366 days of 2024. Most days earn A\$10–50, but rare spike days dominate the annual total. The median (A\$31) is far below the mean (A\$99) due to extreme right skew. TOU daily revenue (A\$82) exceeds the spot median every day.*
 
-#### Representative Day Validation
+**Representative day validation:**
 
 | Day | Date | PyPSA | DP | DP Viol | RL | RL Viol | RL/DP |
 |-----|------|------:|------:|:---:|------:|:---:|:---:|
@@ -268,23 +307,9 @@ The top 10 spike days (2.7% of the year) contribute 44% of annual revenue. Witho
 | Very high | 2024-05-03 | A\$269.85 | A\$279.90 | 8 | A\$276.66 | 0 | 98.8% |
 | Spike | 2024-02-29 | A\$1,593.72 | A\$1,588.45 | 10 | A\$1,577.25 | 0 | 99.3% |
 
-RL achieves zero violations across all five price regimes. The revenue cost of network safety is A\$2–11/day in absolute terms, dropping from 40% on low days to 0.7% on spike days.
+For the complete 366-day analysis, see [docs/full_year_dispatch_analysis.md](docs/full_year_dispatch_analysis.md).
 
-#### Violation Analysis
-
-| Finding | Detail |
-|---------|--------|
-| Days with violations (unconstrained) | 366/366 — every day, both methods |
-| Highest-violation days | Low-revenue days (mean 10.7 viol/day) — not spike days |
-| Reason | Quiet days have frequent small cycles, each causing a voltage excursion |
-| PyPSA vs DP violations | PyPSA has more (3,242 vs 3,021) — continuous actions hit borderline voltages |
-| RL violations | 0 on all representative days — oscillation strategy generalises across all price regimes |
-
-For the complete 366-day analysis including monthly breakdowns, spike day impact, and seasonal patterns, see [docs/full_year_dispatch_analysis.md](docs/full_year_dispatch_analysis.md).
-
-### NPV Analysis
-
-Using the ±100kW / 200kWh GenCost 2hr configuration:
+#### NPV Analysis
 
 | | Spot (Tier 1) | TOU (Tier 1) |
 |---|:---:|:---:|
@@ -294,163 +319,71 @@ Using the ±100kW / 200kWh GenCost 2hr configuration:
 | NPV (20yr, 6.53%) | Depends on spike assumptions | **+A\$139,083** |
 | Simple payback | ~3.1 yr (with spikes), ~8.7 yr (without) | 3.9 yr |
 
-For the full NPV model with three-tier DNSP benefit framework and sensitivity analysis, see [docs/npv_analysis.md](docs/npv_analysis.md).
+For the full NPV model, see [docs/npv_analysis.md](docs/npv_analysis.md).
+
+### 4.2 Stochastic DP: Value of Perfect Information
+
+The POMDP is trained on 2018–2023 data and tested on 2024 (out-of-sample).
+
+**Annual value of perfect information:**
+
+| Metric | Value |
+|--------|-------|
+| Deterministic DP (perfect foresight) | A\$38,681/year |
+| POMDP (regime-aware, no foresight) | A\$23,403/year |
+| **Value of perfect information** | **A\$15,277/year (39.5%)** |
+| Belief convergence (median) | 13 periods (6.5 hours) |
+| Solve time | 27 seconds |
+
+**Breakdown by regime:**
+
+| Regime | Days | Capture Rate | Info Value/year | Median Convergence |
+|--------|:----:|:------------:|:---------------:|:------------------:|
+| $r_0$ (low spread) | 22 | 3.4% | A\$236 | 22 periods (11h) |
+| $r_1$ (moderate) | 71 | 57.0% | A\$1,916 | 6 periods (3h) |
+| $r_2$ (medium) | 32 | 15.7% | A\$566 | 13 periods (6.5h) |
+| $r_3$ (typical) | 206 | 52.0% | A\$3,514 | 10 periods (5h) |
+| $r_4$ (extreme) | 35 | 65.2% | A\$9,046 | 32 periods (16h) |
+
+**Breakdown by day type:**
+
+| Day Type | Days | DP Annual | POMDP Annual | Capture | Info Annual |
+|----------|------|-----------|--------------|---------|-------------|
+| Weekday | 262 | A\$34,111 | A\$24,222 | 71.0% | A\$9,889 |
+| Weekend | 104 | A\$4,570 | A\$2,479 | 54.3% | A\$2,091 |
+
+**Belief convergence.** 67 of 366 test days never converge to the correct regime — the Tauchen matrices trained on 2018–2023 do not recognise 2024's novel price patterns for those days.
+
+For the full analysis, see [docs/stochastic_dp.md](docs/stochastic_dp.md).
 
 ---
 
-## Key Findings
+## 5. Key Findings
 
 **1. Every unconstrained dispatch causes voltage violations.** Across 366 days, both PyPSA and DP produce violations on every single day (3,000+/year). Network-aware dispatch control is not optional — it is a prerequisite for community battery operation.
 
-**2. Q-learning achieves zero violations at 3.2% revenue cost.** The RL agent eliminates all violations across 9 battery configurations, 2 business models, and 5 representative price regimes. The annual revenue sacrifice is A\$1,239 — far less than the cost of a single voltage-related equipment failure.
+**2. Q-learning achieves zero violations at 3.2% revenue cost.** The RL agent eliminates all violations across 9 battery configurations, 2 business models, and 5 representative price regimes. The annual revenue sacrifice is A\$1,239.
 
 **3. The RL oscillation strategy generalises.** The same charge/discharge oscillation pattern appears on every representative day regardless of price level, confirming it is driven by feeder physics rather than market conditions.
 
 **4. TOU dominates spot on a risk-adjusted basis.** TOU provides 2–3× higher violation-free revenue than spot on a typical day, with zero variance. Spot's annual advantage depends entirely on 10 unpredictable spike days that contribute 44% of annual revenue.
 
-**5. The business model matters more than battery size.** A 200 kWh TOU battery earns more than a 400 kWh spot battery. For community battery deployment, the regulatory and contractual framework (which price signal the battery responds to) is the primary determinant of viability.
+**5. The business model matters more than battery size.** A 200 kWh TOU battery earns more than a 400 kWh spot battery. The regulatory and contractual framework is the primary determinant of viability.
 
-**6. Battery capacity reduces the cost of network safety.** At ±80kW/400kWh, the RL revenue gap is A\$0.43/day. At ±100kW/200kWh, it is A\$4.92/day. Larger batteries can sustain discharge longer without needing the oscillation strategy, reducing the network safety overhead.
+**6. Battery capacity reduces the cost of network safety.** At ±80kW/400kWh, the RL revenue gap is A\$0.43/day. At ±100kW/200kWh, it is A\$4.92/day.
 
-### Detailed Documentation
-
-| Document | Contents |
-|----------|----------|
-| [docs/business_models.md](docs/business_models.md) | Model A (spot) vs Model B (TOU): price signals, revenue characteristics, risk comparison |
-| [docs/full_year_dispatch_analysis.md](docs/full_year_dispatch_analysis.md) | 366-day PyPSA + DP + RL analysis with violations, seasonal breakdown, representative day selection |
-| [docs/dp_vs_rl_findings.md](docs/dp_vs_rl_findings.md) | Detailed dispatch profiles, RL strategy analysis, 9-config sensitivity results |
-| [docs/npv_analysis.md](docs/npv_analysis.md) | 20-year NPV model, three-tier DNSP benefit framework, sensitivity analysis |
-| [docs/policy_implications.md](docs/policy_implications.md) | Recommendations for DNSPs, regulators, and community battery operators |
-| [docs/annual_revenue_analysis.md](docs/annual_revenue_analysis.md) | PyPSA LP methodology, objective function, constraints, revenue extraction |
-| [docs/methods.md](docs/methods.md) | Full mathematical formulation: DP, Q-learning, OpenDSS integration |
+**7. Perfect price information is worth A\$15,277/year (39.5% of revenue).** A POMDP controller that learns the price regime through Bayesian updating captures 60.5% of deterministic DP revenue without any price foresight. Regime non-stationarity is the dominant limitation — annual model retraining would recover an additional 8.5 percentage points.
 
 ---
 
-## Future Work
+## 6. Future Work
 
-The current framework uses **deterministic (perfect foresight) optimisation** — the battery knows all 48 prices at the start of each day. In practice, a deployable controller requires a policy conditioned on observable state without knowledge of future prices. We identify three extensions:
+Two extensions remain:
 
-**1. Stochastic DP with price state.** Extend the state space to $(t, \text{SoC}, \text{price percentile}, \text{volatility regime})$. The transition probabilities are estimated from the 2024 AEMO data. The output is a lookup-table policy: "at 17:00, SoC = 120 kWh, price in top 10%, spike day → discharge 100 kW." The gap between deterministic and stochastic optimal revenue quantifies the **value of perfect information** — how much a better price forecast is worth.
+**1. Rolling-horizon model predictive control.** At each time step, observe the current price, forecast the next 2–4 hours, solve a short-horizon LP, execute the first action, then re-plan. The POMDP's value-of-information result (A\$15,277/year) provides an upper bound on how much MPC could improve over the regime-aware controller.
 
-**2. Rolling-horizon model predictive control.** At each time step, observe the current price, forecast the next 2–4 hours, solve a short-horizon LP, execute the first action, then re-plan. This is the industry-standard approach and could use the PyPSA LP as the inner solver.
-
-**3. Deep RL with continuous state.** Replace the tabular Q-learning with a neural network policy (e.g., PPO) trained on historical price episodes. This handles the high-dimensional state space of stochastic prices without explicit discretisation, and could integrate the voltage constraint directly via a Lagrangian penalty.
-
-Each extension builds on the existing codebase and would constitute a research contribution suitable for publication.
+**2. Deep RL with continuous state.** Replace the tabular Q-learning with a neural network policy (e.g., PPO) trained on historical price episodes. This handles the high-dimensional state space of stochastic prices without explicit discretisation, and could integrate the voltage constraint directly via a Lagrangian penalty.
 
 ---
 
-## Project Structure
-
-```
-community-battery/
-├── requirements.txt
-│
-├── scripts/                        ← All runnable entry points
-│   ├── download_prices.py              Download AEMO price data
-│   ├── run_timeseries.py               Baseline vs DP-optimised comparison
-│   ├── run_feedback.py                 DP feedback loop sensitivity analysis
-│   ├── run_qlearning.py                Q-learning sensitivity (Model A: spot)
-│   ├── run_qlearning_tou.py            Q-learning sensitivity (Model B: TOU)
-│   ├── run_business_model_comparison.py  Model A vs Model B comparison
-│   ├── run_branch_comparison.py        Branch A vs Branch B voltage analysis
-│   ├── run_pypsa_annual.py             PyPSA full-year optimisation (366 days)
-│   ├── run_annual_dispatch.py          PyPSA + DP + OpenDSS violations (366 days)
-│   ├── run_representative_days.py      DP + RL on 5 representative price days
-│   ├── run_check_dispatch.py           Verify dispatch against OpenDSS
-│   ├── pick_representative_days.py     Select representative days from annual data
-│   └── generate_figures.py             Generate README figures (histogram, dispatch, heatmap)
-│
-├── dss/
-│   └── suburb_feeder_32.dss        ← OpenDSS circuit definition
-│
-├── src/
-│   ├── dp/                         ← Dynamic programming optimiser
-│   │   ├── battery.py                  Battery physical model
-│   │   ├── solver.py                   Bellman equation solver
-│   │   └── prices.py                   AEMO data + TOU profile builder
-│   │
-│   ├── opendss/                    ← Distribution network model
-│   │   ├── network.py                  OpenDSS interface
-│   │   ├── profiles.py                 Load and solar profiles
-│   │   └── feeders.py                  Feeder element configuration
-│   │
-│   ├── integration/                ← DP ↔ OpenDSS feedback loop
-│   │   ├── timeseries.py               Time-series power flow simulation
-│   │   ├── constraints.py              Voltage constraint generation
-│   │   └── feedback.py                 Iterative DP re-solve
-│   │
-│   ├── rl/                         ← Q-learning with network feedback
-│   │   ├── environment.py              Gymnasium-style OpenDSS environment
-│   │   ├── q_learning.py               Two-phase training algorithm
-│   │   └── utils.py                    DP warm-start, dispatch extraction
-│   │
-│   └── pypsa/                      ← Full-year LP optimisation
-│       ├── network.py                  Single-bus battery network builder
-│       ├── dispatch.py                 Daily optimisation + annual sweep
-│       └── analysis.py                 Revenue statistics and distributions
-│
-├── data/
-│   ├── aemo/                       ← AEMO price data (12 monthly CSVs)
-│   │   ├── nem_prices_NSW1_clean.csv   Cleaned full-year 30-min prices
-│   │   └── prices_*.csv                Representative day extracts
-│   ├── pypsa/
-│   │   ├── annual_revenue.csv          366-day PyPSA revenue results
-│   │   └── annual_dispatch_results.csv 366-day PyPSA + DP with violations
-│   └── q_tables/                   ← Trained Q-tables (.npz)
-│
-├── docs/
-│   ├── figures/                    ← Generated figures for README
-│   │   ├── revenue_histogram.png
-│   │   ├── dispatch_comparison.png
-│   │   └── violations_heatmap.png
-│   ├── methods.md                  ← Full mathematical formulation
-│   ├── business_models.md          ← Model A (spot) vs Model B (TOU) comparison
-│   ├── dp_vs_rl_findings.md        ← Dispatch comparison analysis
-│   ├── npv_analysis.md             ← NPV model and sensitivity
-│   ├── policy_implications.md      ← Policy recommendations
-│   ├── annual_revenue_analysis.md  ← PyPSA methodology and LP formulation
-│   └── full_year_dispatch_analysis.md ← Integrated annual results
-│
-└── tests/
-    └── test_battery.py
-```
-
-## Quick Start
-
-```bash
-# Install dependencies (uv virtual environment)
-uv pip install -r requirements.txt
-
-# Download AEMO NSW1 price data (Jan–Dec 2024)
-python -m scripts.download_prices
-
-# Single-day analysis
-python -m scripts.run_timeseries               # Baseline vs DP comparison
-python -m scripts.run_qlearning                # RL spot price training (9 configs)
-python -m scripts.run_qlearning_tou            # RL TOU price training (9 configs)
-
-# Full-year analysis
-python -m scripts.run_pypsa_annual             # PyPSA LP, 366 days (~60s)
-python -m scripts.run_annual_dispatch          # PyPSA + DP + violations (~36 min)
-python -m scripts.run_representative_days      # DP + RL on 5 representative days (~50 min)
-
-# Analyse cached results
-python -m scripts.run_pypsa_annual --cached
-python -m scripts.run_annual_dispatch --cached
-
-# Generate figures for README
-python -m scripts.generate_figures             # Revenue histogram + dispatch comparison
-python -m scripts.generate_figures --with-heatmap  # + violations heatmap (~36 min)
-```
-
-## Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| `opendssdirect.py` | OpenDSS power flow engine |
-| `numpy` | Numerical computation |
-| `pandas` | Data handling and resampling |
-| `requests` | AEMO data download |
-| `pypsa` | Linear optimal power flow |
-| `highspy` | HiGHS LP solver for PyPSA |
+For project structure, installation instructions, and quick start commands, see [docs/setup.md](docs/setup.md).
